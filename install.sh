@@ -198,7 +198,7 @@ apt install -y curl wget socat unzip tar gnupg2 lsb-release ca-certificates \
 
 # Генерация данных
 XUI_USERNAME="admin$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 4)"
-XUI_PASSWORD=$(head /dev/urandom | tr -dc A-Za-z0-9@#%$ | head -c 20)
+XUI_PASSWORD=$(head /dev/urandom | tr -dc 'A-Za-z0-9@#%_' | head -c 20)
 API_KEY=$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 32)
 
 log "Порт: ${CYAN}${RANDOM_PORT}${NC}"
@@ -526,8 +526,7 @@ CATHTML
 
 IPV6_L=""
 if [[ "$ENABLE_IPV6" == "y" ]]; then
-    IPV6_L="listen [::]:80;
-    listen [::]:443 ssl http2;"
+    IPV6_L="listen [::]:80;\n    listen [::]:443 ssl http2;"
 fi
 
 # Определяем пути к SSL сертификатам
