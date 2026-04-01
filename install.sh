@@ -273,6 +273,14 @@ if [[ "$ENABLE_IPV6" == "y" ]]; then
     sed -i 's/IPV6=no/IPV6=yes/' /etc/default/ufw
 fi
 ufw --force reset
+# Docker мостирует трафик через FORWARD; у UFW по умолчанию DROP → контейнеры без выхода в сеть/NAT.
+if [[ "$INSTALL_DOCKER" == "y" ]] && [[ -f /etc/default/ufw ]]; then
+    if grep -q '^DEFAULT_FORWARD_POLICY=' /etc/default/ufw; then
+        sed -i 's/^DEFAULT_FORWARD_POLICY=.*/DEFAULT_FORWARD_POLICY="ACCEPT"/' /etc/default/ufw
+    else
+        printf '\n# Docker: разрешить forwarding для bridge (docker0)\nDEFAULT_FORWARD_POLICY="ACCEPT"\n' >> /etc/default/ufw
+    fi
+fi
 ufw default deny incoming
 ufw default allow outgoing
 
@@ -294,6 +302,12 @@ if [[ "$ENABLE_WIREGUARD" == "y" ]]; then
 fi
 if [[ "$ENABLE_HYSTERIA" == "y" ]]; then
     ufw allow 443/udp
+fi
+if [[ "$INSTALL_PORTAINER" == "y" ]]; then
+    ufw allow 9000/tcp comment 'Portainer'
+fi
+if [[ "$SETUP_UPTIME_KUMA" == "y" && "$INSTALL_DOCKER" == "y" ]]; then
+    ufw allow 3001/tcp comment 'Uptime-Kuma'
 fi
 
 echo "y" | ufw enable
@@ -389,7 +403,16 @@ systemctl enable fail2ban
 # =============================================================================
 DOCKER_OK=false
 if [[ "$INSTALL_DOCKER" == "y" ]]; then
-    if curl -fsSL https://get.docker.com | sh && systemctl enable --now docker; then
+    if curl -fsSL https://get.docker.com | sh; then
+        systemctl daemon-reload 2>/dev/null || true
+        systemctl reset-failed docker.service docker.socket 2>/dev/null || true
+        systemctl unmask docker.socket docker.service 2>/dev/null || true
+        # Ubuntu/Debian: dockerd слушает через socket activation; без активного docker.socket
+        # падает с "no sockets found via socket activation".
+        if systemctl cat docker.socket &>/dev/null; then
+            systemctl enable --now docker.socket
+        fi
+        systemctl enable --now docker.service
         if systemctl is-active --quiet docker; then
             DOCKER_OK=true
         else
@@ -444,10 +467,33 @@ case $ARCH in
 esac
 
 log "Загрузка X-UI ${LATEST_VER}..."
-curl -L "https://github.com/${XUI_REPO}/releases/download/${LATEST_VER}/${FNAME}.tar.gz" -o /root/${FNAME}.tar.gz
-tar zxvf /root/${FNAME}.tar.gz -C /root/
+XUI_TARBALL="/root/${FNAME}.tar.gz"
+XUI_TMPDIR="$(mktemp -d)"
+curl -L "https://github.com/${XUI_REPO}/releases/download/${LATEST_VER}/${FNAME}.tar.gz" -o "${XUI_TARBALL}"
+tar -xzf "${XUI_TARBALL}" -C "${XUI_TMPDIR}"
+
+# В разных релизах папка внутри архива может называться по-разному (часто просто `x-ui/`).
+XUI_SRC_DIR=""
+if [[ -d "${XUI_TMPDIR}/${FNAME}" ]]; then
+    XUI_SRC_DIR="${XUI_TMPDIR}/${FNAME}"
+elif [[ -d "${XUI_TMPDIR}/x-ui" ]]; then
+    XUI_SRC_DIR="${XUI_TMPDIR}/x-ui"
+else
+    first_dir="$(find "${XUI_TMPDIR}" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+    if [[ -n "${first_dir}" ]]; then
+        XUI_SRC_DIR="${first_dir}"
+    fi
+fi
+
+if [[ -z "${XUI_SRC_DIR}" || ! -f "${XUI_SRC_DIR}/x-ui" ]]; then
+    error_log "Не найден бинарник x-ui в архиве (${FNAME}.tar.gz)"
+    rm -rf "${XUI_TMPDIR}"
+    exit 1
+fi
+
 rm -rf /usr/local/x-ui
-mv /root/${FNAME} /usr/local/x-ui
+mv "${XUI_SRC_DIR}" /usr/local/x-ui
+rm -rf "${XUI_TMPDIR}"
 
 # Обход проверки версии
 if [[ -f /usr/local/x-ui/x-ui ]]; then
