@@ -195,7 +195,7 @@ MIT License — см. [LICENSE](LICENSE)
 
 <div align="center">
 
-**X-UI Ultimate Installer v1.0.1**
+**X-UI Ultimate Installer v1.0.2**
 
 [⬆️ Наверх](#x-ui-ultimate-installer)
 

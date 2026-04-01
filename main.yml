@@ -21,8 +21,8 @@ jobs:
     - name: Check shellcheck
       run: |
         sudo apt install -y shellcheck
-        shellcheck install.sh || true
-        echo "⚠️ Shellcheck completed"
+        shellcheck install.sh
+        echo "✅ Shellcheck passed"
 
   test-install:
     runs-on: ubuntu-latest

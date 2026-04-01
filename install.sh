@@ -42,11 +42,12 @@ fi
 
 # Проверка ОС
 if [[ -f /etc/os-release ]]; then
+    # shellcheck disable=SC1091
     . /etc/os-release
     OS_ID="${ID:-unknown}"
     if [[ "$OS_ID" != "ubuntu" && "$OS_ID" != "debian" ]]; then
         warn_log "Тестировался на Ubuntu/Debian. Ваша ОС: $OS_ID"
-        read -p "Продолжить? (y/n): " c
+        read -r -p "Продолжить? (y/n): " c
         if [[ "$c" != "y" ]]; then
             exit 1
         fi
@@ -74,13 +75,13 @@ fi
 # =============================================================================
 log "=== 📋 Настройки ==="
 
-read -p "Домен: " DOMAIN
+read -r -p "Домен: " DOMAIN
 if [[ -z "$DOMAIN" ]]; then
     error_log "Домен обязателен"
     exit 1
 fi
 
-read -p "Email для SSL: " SSL_EMAIL
+read -r -p "Email для SSL: " SSL_EMAIL
 if [[ ! "$SSL_EMAIL" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]]; then
     SSL_EMAIL="admin@${DOMAIN}"
     warn_log "Email: $SSL_EMAIL"
@@ -90,7 +91,7 @@ echo -e "${CYAN}Версия X-UI:${NC}"
 echo "  1) vaxilu/x-ui (старая)"
 echo "  2) MHSanaei/3x-ui (рекомендуется)"
 echo "  3) FranzKafkaYu/x-ui"
-read -p "Выбор (Enter=2): " xv
+read -r -p "Выбор (Enter=2): " xv
 case $xv in
     1) XUI_REPO="vaxilu/x-ui" ;;
     3) XUI_REPO="FranzKafkaYu/x-ui" ;;
@@ -98,31 +99,38 @@ case $xv in
 esac
 log "Выбрана версия: ${CYAN}$XUI_REPO${NC}"
 
-read -p "Включить IPv6? (y/n): " ENABLE_IPV6
+read -r -p "Включить IPv6? (y/n): " ENABLE_IPV6
 
 log "=== 🛡️ Обход блокировок ==="
-read -p "Маскировка трафика? (y/n): " ENABLE_OBFUSCATION
+read -r -p "Маскировка трафика? (y/n): " ENABLE_OBFUSCATION
 TRANSPORT_TYPE="ws"
 if [[ "$ENABLE_OBFUSCATION" == "y" ]]; then
     echo "  1) WebSocket (рек)  2) gRPC  3) HTTP/2"
-    read -p "Транспорт (Enter=1): " tc
+    read -r -p "Транспорт (Enter=1): " tc
     case $tc in
         2) TRANSPORT_TYPE="grpc" ;;
         3) TRANSPORT_TYPE="http" ;;
     esac
 fi
 
-read -p "Cloudflare CDN? (y/n): " USE_CDN
-read -p "ShadowTLS? (y/n): " ENABLE_SHADOWTLS
-read -p "Reality протокол? (y/n): " ENABLE_REALITY
-read -p "Hysteria 2? (y/n): " ENABLE_HYSTERIA
-read -p "Tuic? (y/n): " ENABLE_TUIC
-read -p "WireGuard? (y/n): " ENABLE_WIREGUARD
+read -r -p "Cloudflare CDN? (y/n): " USE_CDN
+read -r -p "ShadowTLS? (y/n): " ENABLE_SHADOWTLS
+read -r -p "Reality протокол? (y/n): " ENABLE_REALITY
+read -r -p "Hysteria 2? (y/n): " ENABLE_HYSTERIA
+read -r -p "Tuic? (y/n): " ENABLE_TUIC
+read -r -p "WireGuard? (y/n): " ENABLE_WIREGUARD
+
+if [[ "$ENABLE_OBFUSCATION" == "y" ]]; then
+    log "Транспорт маскировки: ${TRANSPORT_TYPE}"
+fi
+if [[ "$ENABLE_REALITY" == "y" ]]; then
+    warn_log "Reality: настройте вручную в панели X-UI после установки"
+fi
 
 if [[ "$USE_CDN" == "y" ]]; then
     RANDOM_PORT=$((RANDOM % 57000 + 8000))
 else
-    read -p "Порт 443? (y/n): " USE_PORT_443
+    read -r -p "Порт 443? (y/n): " USE_PORT_443
     if [[ "$USE_PORT_443" == "y" ]]; then
         RANDOM_PORT="443"
     else
@@ -135,56 +143,56 @@ echo "${RANDOM_PORT}" > /root/x-ui-port.txt
 chmod 600 /root/x-ui-port.txt
 
 log "=== 🔒 Безопасность ==="
-read -p "SSH hardening? (y/n): " SETUP_SSH_HARDENING
+read -r -p "SSH hardening? (y/n): " SETUP_SSH_HARDENING
 SSH_PORT="22"
 if [[ "$SETUP_SSH_HARDENING" == "y" ]]; then
-    read -p "Порт SSH (Enter=случайный): " SSH_PORT
+    read -r -p "Порт SSH (Enter=случайный): " SSH_PORT
     if [[ -z "$SSH_PORT" ]]; then
         SSH_PORT=$((RANDOM % 64000 + 1024))
     fi
 fi
-read -p "2FA? (y/n): " ENABLE_2FA
-read -p "AppArmor? (y/n): " ENABLE_APPARMOR
-read -p "DDoS защита? (y/n): " ENABLE_DDOS_PROT
+read -r -p "2FA? (y/n): " ENABLE_2FA
+read -r -p "AppArmor? (y/n): " ENABLE_APPARMOR
+read -r -p "DDoS защита? (y/n): " ENABLE_DDOS_PROT
 
 log "=== 📊 Мониторинг ==="
-read -p "Telegram? (y/n): " SETUP_TELEGRAM
+read -r -p "Telegram? (y/n): " SETUP_TELEGRAM
 if [[ "$SETUP_TELEGRAM" == "y" ]]; then
-    read -p "Токен бота: " TELEGRAM_BOT_TOKEN
-    read -p "Chat ID: " TELEGRAM_CHAT_ID
+    read -r -p "Токен бота: " TELEGRAM_BOT_TOKEN
+    read -r -p "Chat ID: " TELEGRAM_CHAT_ID
 fi
-read -p "Discord webhook? (y/n): " SETUP_DISCORD
+read -r -p "Discord webhook? (y/n): " SETUP_DISCORD
 if [[ "$SETUP_DISCORD" == "y" ]]; then
-    read -p "URL: " DISCORD_WEBHOOK
+    read -r -p "URL: " DISCORD_WEBHOOK
 fi
-read -p "Uptime Kuma? (y/n): " SETUP_UPTIME_KUMA
+read -r -p "Uptime Kuma? (y/n): " SETUP_UPTIME_KUMA
 
 log "=== 🔄 Автообновление ==="
-read -p "Автообновление X-UI? (y/n): " ENABLE_AUTO_UPDATE
-read -p "Автобэкап? (y/n): " ENABLE_AUTO_BACKUP
+read -r -p "Автообновление X-UI? (y/n): " ENABLE_AUTO_UPDATE
+read -r -p "Автобэкап? (y/n): " ENABLE_AUTO_BACKUP
 BACKUP_PATH="/root/x-ui-backups"
 
 log "=== 🐳 Docker ==="
-read -p "Docker? (y/n): " INSTALL_DOCKER
+read -r -p "Docker? (y/n): " INSTALL_DOCKER
 INSTALL_PORTAINER="n"
 if [[ "$INSTALL_DOCKER" == "y" ]]; then
-    read -p "Portainer? (y/n): " INSTALL_PORTAINER
+    read -r -p "Portainer? (y/n): " INSTALL_PORTAINER
 fi
 
 log "=== 📦 Протоколы ==="
-read -p "Trojan-Go? (y/n): " INSTALL_TROJAN_GO
-read -p "Brook? (y/n): " INSTALL_BROOK
-read -p "Sing-Box? (y/n): " INSTALL_SINGBOX
+read -r -p "Trojan-Go? (y/n): " INSTALL_TROJAN_GO
+read -r -p "Brook? (y/n): " INSTALL_BROOK
+read -r -p "Sing-Box? (y/n): " INSTALL_SINGBOX
 
 log "=== 📱 Клиенты ==="
-read -p "Генерация подписок? (y/n): " CREATE_SUBSCRIPTION
-read -p "QR коды? (y/n): " GENERATE_QR
-read -p "REST API? (y/n): " CREATE_API
-read -p "Конвертер ссылок? (y/n): " INSTALL_LINK_CONVERTER
+read -r -p "Генерация подписок? (y/n): " CREATE_SUBSCRIPTION
+read -r -p "QR коды? (y/n): " GENERATE_QR
+read -r -p "REST API? (y/n): " CREATE_API
+read -r -p "Конвертер ссылок? (y/n): " INSTALL_LINK_CONVERTER
 
-read -p "Очистка системы? (y/n): " ENABLE_CLEANUP
-read -p "Speedtest? (y/n): " INSTALL_SPEEDTEST
-read -p "ZeroSSL вместо Let's Encrypt? (y/n): " USE_ZEROSL
+read -r -p "Очистка системы? (y/n): " ENABLE_CLEANUP
+read -r -p "Speedtest? (y/n): " INSTALL_SPEEDTEST
+read -r -p "ZeroSSL вместо Let's Encrypt? (y/n): " USE_ZEROSL
 
 # =============================================================================
 # Обновление
@@ -260,7 +268,7 @@ ufw default allow outgoing
 
 ufw allow 22/tcp comment 'SSH'
 if [[ "$SETUP_SSH_HARDENING" == "y" && "$SSH_PORT" != "22" ]]; then
-    ufw allow ${SSH_PORT}/tcp comment 'SSH2'
+    ufw allow "${SSH_PORT}"/tcp comment 'SSH2'
 fi
 ufw allow 80/tcp 443/tcp ${RANDOM_PORT}/tcp
 if [[ "$ENABLE_IPV6" == "y" ]]; then
@@ -309,10 +317,34 @@ fi
 sysctl --system
 
 # =============================================================================
-# Fail2ban
+# SSH Hardening
+# =============================================================================
+if [[ "$SETUP_SSH_HARDENING" == "y" ]]; then
+    SSH_BAK="/etc/ssh/sshd_config.bak.$(date +%Y%m%d%H%M%S)"
+    cp /etc/ssh/sshd_config "$SSH_BAK"
+    cat > /etc/ssh/sshd_config << SSHC
+Port ${SSH_PORT}
+Protocol 2
+PermitRootLogin no
+PubkeyAuthentication yes
+PasswordAuthentication no
+X11Forwarding no
+MaxAuthTries 3
+SSHC
+    if sshd -t; then
+        systemctl restart sshd
+    else
+        error_log "SSH ошибка"
+        cp "$SSH_BAK" /etc/ssh/sshd_config
+        SSH_PORT="22"
+    fi
+fi
+
+# =============================================================================
+# Fail2ban (после SSH: корректный порт sshd в jail)
 # =============================================================================
 log "Fail2ban..."
-cat > /etc/fail2ban/jail.local << 'F2BJ'
+cat > /etc/fail2ban/jail.local << F2BJ
 [DEFAULT]
 bantime=3600
 maxretry=5
@@ -320,7 +352,7 @@ banaction=ufw
 
 [sshd]
 enabled=true
-port=ssh
+port=${SSH_PORT}
 maxretry=3
 
 [x-ui]
@@ -336,30 +368,9 @@ failregex=.*Failed.*
 ignoreregex=
 F2BF
 
+mkdir -p /var/log/x-ui
 systemctl restart fail2ban
 systemctl enable fail2ban
-
-# =============================================================================
-# SSH Hardening
-# =============================================================================
-if [[ "$SETUP_SSH_HARDENING" == "y" ]]; then
-    cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak.$(date +%Y%m%d)
-    cat > /etc/ssh/sshd_config << SSHC
-Port ${SSH_PORT}
-Protocol 2
-PermitRootLogin no
-PubkeyAuthentication yes
-PasswordAuthentication no
-X11Forwarding no
-MaxAuthTries 3
-SSHC
-    if sshd -t; then
-        systemctl restart sshd
-    else
-        error_log "SSH ошибка"
-        cp /etc/ssh/sshd_config.bak.* /etc/ssh/sshd_config
-    fi
-fi
 
 # =============================================================================
 # Docker
@@ -395,7 +406,7 @@ log "X-UI..."
 
 if systemctl is-active --quiet x-ui 2>/dev/null || systemctl is-active --quiet 3x-ui 2>/dev/null; then
     warn_log "X-UI установлен"
-    read -p "Переустановить? (y/n): " reinstall
+    read -r -p "Переустановить? (y/n): " reinstall
     if [[ "$reinstall" != "y" ]]; then
         exit 0
     fi
@@ -485,6 +496,7 @@ log "SSL..."
 SSL_OK=false
 
 if [[ "$USE_ZEROSL" == "y" ]]; then
+    # shellcheck disable=SC1090
     if curl https://get.acme.sh | sh -s email="${SSL_EMAIL}" && source ~/.bashrc; then
         ~/.acme.sh/acme.sh --register-account -m "${SSL_EMAIL}"
         if ~/.acme.sh/acme.sh --issue -d "${DOMAIN}" --standalone --force; then
@@ -524,9 +536,11 @@ cat > /var/www/html/index.html << 'CATHTML'
 <body><div class="container"><div class="cat">🐱</div><h1>Мяу-Сервер</h1><p>Сервер охраняется котиками 24/7</p><div class="status">Онлайн</div><br><a href="/admin" class="btn">Войти</a></div></body></html>
 CATHTML
 
-IPV6_L=""
+IPV6_HTTP=""
+IPV6_HTTPS=""
 if [[ "$ENABLE_IPV6" == "y" ]]; then
-    IPV6_L="listen [::]:80;\n    listen [::]:443 ssl http2;"
+    IPV6_HTTP="    listen [::]:80;"
+    IPV6_HTTPS="    listen [::]:443 ssl http2;"
 fi
 
 # Определяем пути к SSL сертификатам
@@ -541,13 +555,13 @@ fi
 cat > /etc/nginx/sites-available/default << NGC
 server {
     listen 80;
-    ${IPV6_L}
+    ${IPV6_HTTP}
     server_name ${DOMAIN};
     return 301 https://\$server_name\$request_uri;
 }
 server {
     listen 443 ssl http2;
-    ${IPV6_L}
+    ${IPV6_HTTPS}
     server_name ${DOMAIN};
     ssl_certificate ${SSL_CERT_PATH};
     ssl_certificate_key ${SSL_KEY_PATH};
@@ -587,7 +601,7 @@ if [[ "$INSTALL_SINGBOX" == "y" ]]; then
     SB_VER=$(curl -s https://api.github.com/repos/SagerNet/sing-box/releases/latest | grep -oP '"tag_name": "\K[v0-9.]+')
     curl -L "https://github.com/SagerNet/sing-box/releases/download/${SB_VER}/sing-box-${SB_VER}-linux-amd64.tar.gz" -o /tmp/sb.tar.gz
     tar -xzf /tmp/sb.tar.gz -C /tmp/
-    mv /tmp/sing-box-${SB_VER}-linux-amd64/sing-box /usr/local/bin/
+    mv "/tmp/sing-box-${SB_VER}-linux-amd64/sing-box" /usr/local/bin/
     rm -rf /tmp/sb.tar.gz /tmp/sing-box-*
     chmod +x /usr/local/bin/sing-box
 fi
@@ -681,7 +695,7 @@ fi
 # Подписки
 # =============================================================================
 if [[ "$CREATE_SUBSCRIPTION" == "y" ]]; then
-    RANDOM_PORT=$(cat /root/x-ui-port.txt 2>/dev/null || echo "8080")
+    RANDOM_PORT=$(cat /root/x-ui-port.txt 2>/dev/null || echo "$RANDOM_PORT")
     cat > /usr/local/x-ui/generate-subscription.sh << SUBSH
 #!/bin/bash
 SUB="/usr/local/x-ui/subscriptions.txt"
@@ -723,9 +737,8 @@ fi
 # =============================================================================
 if [[ "$CREATE_API" == "y" ]]; then
     log "REST API..."
-    apt install -y python3-pip
-    pip3 install flask
-    
+    apt install -y python3-flask
+
     cat > /usr/local/x-ui/api.py << APIPY
 #!/usr/bin/env python3
 from flask import Flask, jsonify, request
@@ -794,11 +807,11 @@ if [[ "$INSTALL_LINK_CONVERTER" == "y" ]]; then
     cat > /usr/local/x-ui/link-converter.sh << 'CONVSH'
 #!/bin/bash
 echo "1) To Base64  2) From Base64  3) To QR  4) Exit"
-read -p "Choice: " c
+read -r -p "Choice: " c
 case $c in
-    1) read -p "Link: " l; echo "$l" | base64 -w0 ;;
-    2) read -p "Base64: " b; echo "$b" | base64 -d ;;
-    3) read -p "Link: " l; echo "$l" | qrencode -o - -t ansi ;;
+    1) read -r -p "Link: " l; echo "$l" | base64 -w0 ;;
+    2) read -r -p "Base64: " b; echo "$b" | base64 -d ;;
+    3) read -r -p "Link: " l; echo "$l" | qrencode -o - -t ansi ;;
 esac
 CONVSH
     chmod +x /usr/local/x-ui/link-converter.sh
@@ -918,7 +931,7 @@ fi
 if [[ "$CREATE_API" == "y" ]]; then
     echo -e "  API: http://localhost:8080/api/"
 fi
-if [[ "$SETUP_UPTIME_KUMA" == "y" ]]; then
+if [[ "$SETUP_UPTIME_KUMA" == "y" && "$DOCKER_OK" == "true" ]]; then
     echo -e "  Uptime Kuma: http://${DOMAIN}:3001"
 fi
 if [[ "$INSTALL_PORTAINER" == "y" ]]; then
