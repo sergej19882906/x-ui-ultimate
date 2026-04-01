@@ -1,12 +1,12 @@
 #!/bin/bash
 
 # =============================================================================
-# X-UI Ultimate Installation Script v1.0.2
+# X-UI Ultimate Installation Script v1.0.3
 # Полная настройка безопасности, мониторинга, обхода блокировок и оптимизации
 # =============================================================================
 # GitHub: https://github.com/sergej19882906/x-ui-ultimate
 # License: MIT
-# Version: 1.0.2
+# Version: 1.0.3
 # Year: 2026
 # =============================================================================
 # ⚠️ ПРЕДУПРЕЖДЕНИЕ: Использование для обхода блокировок может быть
@@ -226,15 +226,45 @@ if [[ "$ENABLE_OBFUSCATION" == "y" || "$ENABLE_SHADOWTLS" == "y" || "$ENABLE_HYS
     systemctl enable --now v2ray 2>/dev/null || true
 
     if [[ "$ENABLE_HYSTERIA" == "y" ]]; then
-        HY_VER=$(curl -s https://api.github.com/repos/apernet/hysteria/releases/latest | grep -oP '"tag_name": "\Kapp/v[0-9.]+' || echo "app/v2.5.6")
-        curl -L "https://github.com/apernet/hysteria/releases/download/${HY_VER}/hysteria-linux-amd64" -o /usr/local/bin/hysteria
-        chmod +x /usr/local/bin/hysteria
+        case $ARCH in
+            x86_64) HY_BIN="hysteria-linux-amd64" ;;
+            aarch64) HY_BIN="hysteria-linux-arm64" ;;
+            armv7l) HY_BIN="hysteria-linux-armv7" ;;
+            *)
+                warn_log "Hysteria: нет готовой сборки для $ARCH — пропуск"
+                HY_BIN=""
+                ;;
+        esac
+        if [[ -n "$HY_BIN" ]]; then
+            HY_VER=$(curl -s https://api.github.com/repos/apernet/hysteria/releases/latest | grep -oP '"tag_name": "\Kapp/v[0-9.]+' || echo "app/v2.5.6")
+            if curl -fsSL "https://github.com/apernet/hysteria/releases/download/${HY_VER}/${HY_BIN}" -o /usr/local/bin/hysteria; then
+                chmod +x /usr/local/bin/hysteria
+            else
+                warn_log "Hysteria: не удалось скачать ${HY_VER}/${HY_BIN}"
+                rm -f /usr/local/bin/hysteria
+            fi
+        fi
     fi
-    
+
     if [[ "$ENABLE_TUIC" == "y" ]]; then
-        TUIC_VER=$(curl -s https://api.github.com/repos/EAimTY/tuic/releases/latest | grep -oP '"tag_name": "\K[0-9.]+' || echo "1.0.0")
-        curl -L "https://github.com/EAimTY/tuic/releases/download/${TUIC_VER}/tuic-server-${TUIC_VER}-x86_64-unknown-linux-musl" -o /usr/local/bin/tuic
-        chmod +x /usr/local/bin/tuic
+        case $ARCH in
+            x86_64) TUIC_LA="x86_64-unknown-linux-musl" ;;
+            aarch64) TUIC_LA="aarch64-unknown-linux-musl" ;;
+            *)
+                warn_log "Tuic: нет готовой сборки для $ARCH — пропуск"
+                TUIC_LA=""
+                ;;
+        esac
+        if [[ -n "$TUIC_LA" ]]; then
+            TUIC_RAW=$(curl -s https://api.github.com/repos/EAimTY/tuic/releases/latest | grep -oP '"tag_name": "\K[^"]+' || echo "v1.6.1")
+            TUIC_VER="${TUIC_RAW#v}"
+            if curl -fsSL "https://github.com/EAimTY/tuic/releases/download/${TUIC_RAW}/tuic-server-${TUIC_VER}-${TUIC_LA}" -o /usr/local/bin/tuic; then
+                chmod +x /usr/local/bin/tuic
+            else
+                warn_log "Tuic: не удалось скачать tuic-server-${TUIC_VER}-${TUIC_LA}"
+                rm -f /usr/local/bin/tuic
+            fi
+        fi
     fi
     
     if [[ "$ENABLE_SHADOWTLS" == "y" ]]; then
@@ -255,6 +285,8 @@ fi
 # WireGuard
 if [[ "$ENABLE_WIREGUARD" == "y" ]]; then
     apt install -y wireguard qrencode
+    mkdir -p /etc/wireguard
+    chmod 700 /etc/wireguard
     wg genkey | tee /etc/wireguard/private.key | wg pubkey | tee /etc/wireguard/public.key
     cat > /etc/wireguard/wg0.conf << WGC
 [Interface]
@@ -350,7 +382,6 @@ if [[ "$SETUP_SSH_HARDENING" == "y" ]]; then
     cp /etc/ssh/sshd_config "$SSH_BAK"
     cat > /etc/ssh/sshd_config << SSHC
 Port ${SSH_PORT}
-Protocol 2
 PermitRootLogin no
 PubkeyAuthentication yes
 PasswordAuthentication no
@@ -358,7 +389,7 @@ X11Forwarding no
 MaxAuthTries 3
 SSHC
     if sshd -t; then
-        systemctl restart sshd
+        systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || error_log "Не удалось перезапустить SSH"
     else
         error_log "SSH ошибка"
         cp "$SSH_BAK" /etc/ssh/sshd_config
@@ -640,18 +671,50 @@ log "Протоколы..."
 
 if [[ "$INSTALL_TROJAN_GO" == "y" ]]; then
     TJ_VER=$(curl -s https://api.github.com/repos/p4gefau1t/trojan-go/releases/latest | grep -oP '"tag_name": "\K[v0-9.]+')
-    curl -L "https://github.com/p4gefau1t/trojan-go/releases/download/${TJ_VER}/trojan-go-linux-amd64.zip" -o /tmp/tj.zip
-    unzip -o /tmp/tj.zip -d /usr/local/bin/
-    rm -f /tmp/tj.zip
-    chmod +x /usr/local/bin/trojan-go
-    ufw allow 443/tcp comment 'Trojan' 2>/dev/null || true
+    [[ -z "$TJ_VER" ]] && TJ_VER="v0.10.6"
+    case $ARCH in
+        x86_64) TJ_ZIP="trojan-go-linux-amd64.zip" ;;
+        aarch64) TJ_ZIP="trojan-go-linux-arm64.zip" ;;
+        armv7l) TJ_ZIP="trojan-go-linux-armv7.zip" ;;
+        *)
+            warn_log "Trojan-Go: нет сборки для $ARCH — пропуск"
+            TJ_ZIP=""
+            ;;
+    esac
+    if [[ -n "$TJ_ZIP" ]]; then
+        if curl -fsSL "https://github.com/p4gefau1t/trojan-go/releases/download/${TJ_VER}/${TJ_ZIP}" -o /tmp/tj.zip; then
+            unzip -o /tmp/tj.zip -d /usr/local/bin/
+            rm -f /tmp/tj.zip
+            chmod +x /usr/local/bin/trojan-go
+            ufw allow 443/tcp comment 'Trojan' 2>/dev/null || true
+        else
+            warn_log "Trojan-Go: загрузка ${TJ_ZIP} не удалась"
+            rm -f /tmp/tj.zip
+        fi
+    fi
 fi
 
 if [[ "$INSTALL_BROOK" == "y" ]]; then
     BK_VER=$(curl -s https://api.github.com/repos/txthinking/brook/releases/latest | grep -oP '"tag_name": "\K[v0-9.]+')
-    curl -L "https://github.com/txthinking/brook/releases/download/${BK_VER}/brook_linux_amd64" -o /usr/local/bin/brook
-    chmod +x /usr/local/bin/brook
-    ufw allow 9999/tcp comment 'Brook' 2>/dev/null || true
+    [[ -z "$BK_VER" ]] && BK_VER="v20240214"
+    case $ARCH in
+        x86_64) BK_BIN="brook_linux_amd64" ;;
+        aarch64) BK_BIN="brook_linux_arm64" ;;
+        armv7l) BK_BIN="brook_linux_armv7" ;;
+        *)
+            warn_log "Brook: нет сборки для $ARCH — пропуск"
+            BK_BIN=""
+            ;;
+    esac
+    if [[ -n "$BK_BIN" ]]; then
+        if curl -fsSL "https://github.com/txthinking/brook/releases/download/${BK_VER}/${BK_BIN}" -o /usr/local/bin/brook; then
+            chmod +x /usr/local/bin/brook
+            ufw allow 9999/tcp comment 'Brook' 2>/dev/null || true
+        else
+            warn_log "Brook: загрузка не удалась"
+            rm -f /usr/local/bin/brook
+        fi
+    fi
 fi
 
 if [[ "$INSTALL_SINGBOX" == "y" ]]; then
@@ -706,13 +769,14 @@ chmod 600 /root/x-ui-credentials.txt
 # Автообновление
 # =============================================================================
 if [[ "$ENABLE_AUTO_UPDATE" == "y" ]]; then
-    cat > /usr/local/x-ui/auto-update.sh << 'AUTOU'
+    cat > /usr/local/x-ui/auto-update.sh << AUTOU
 #!/bin/bash
 LOG="/var/log/x-ui-autoupdate.log"
-CUR=$(x-ui version 2>/dev/null || echo "unknown")
-LAT=$(curl -s https://api.github.com/repos/MHSanaei/3x-ui/releases/latest | grep -oP '"tag_name": "\K[^"]+')
-if [[ "$CUR" != "$LAT" ]]; then
-    echo "[$(date)] Update $CUR -> $LAT" >> "$LOG"
+CUR=\$(x-ui version 2>/dev/null || echo "unknown")
+LAT=\$(curl -s https://api.github.com/repos/${XUI_REPO}/releases/latest | grep -oP '"tag_name": "\K[^"]+')
+[[ -z "\$LAT" ]] && exit 0
+if [[ "\$CUR" != "\$LAT" ]]; then
+    echo "[\$(date)] Update \$CUR -> \$LAT" >> "\$LOG"
     x-ui update
     systemctl restart x-ui
 fi
@@ -732,7 +796,7 @@ BD="${BACKUP_PATH}"
 DT=\$(date +%Y%m%d_%H%M%S)
 cp /usr/local/x-ui/x-ui.db "\${BD}/x-ui-db-\${DT}.bak" 2>/dev/null
 cd "\${BD}" && ls -t *.bak 2>/dev/null | tail -n +11 | xargs -r rm
-echo "[$(date)] Backup: \${DT}" >> /var/log/x-ui-backup.log
+echo "[\$(date)] Backup: \${DT}" >> /var/log/x-ui-backup.log
 BACKUP
     chmod +x /usr/local/x-ui/backup.sh
     (crontab -l 2>/dev/null; echo "0 3 * * * /usr/local/x-ui/backup.sh") | crontab -
@@ -962,7 +1026,7 @@ fi
 # =============================================================================
 echo ""
 echo -e "${GREEN}╔═══════════════════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║           ✅ Установка завершена! v1.0.2                 ║${NC}"
+echo -e "${GREEN}║           ✅ Установка завершена! v1.0.3                 ║${NC}"
 echo -e "${GREEN}╚═══════════════════════════════════════════════════════════╝${NC}"
 echo ""
 echo -e "${CYAN}📊 Информация:${NC}"
@@ -1006,7 +1070,7 @@ fi
 if [[ "$SETUP_UPTIME_KUMA" == "y" && "$DOCKER_OK" == "true" ]]; then
     echo -e "  Uptime Kuma: http://${DOMAIN}:3001"
 fi
-if [[ "$INSTALL_PORTAINER" == "y" ]]; then
+if [[ "$INSTALL_PORTAINER" == "y" && "$DOCKER_OK" == "true" ]]; then
     echo -e "  Portainer:   http://${DOMAIN}:9000"
 fi
 

@@ -1,6 +1,6 @@
 # 🚀 X-UI Ultimate Installer
 
-[![Version](https://img.shields.io/badge/version-1.0.2-blue.svg)](https://github.com/sergej19882906/x-ui-ultimate/releases)
+[![Version](https://img.shields.io/badge/version-1.0.3-blue.svg)](https://github.com/sergej19882906/x-ui-ultimate/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Ubuntu](https://img.shields.io/badge/ubuntu-20.04+-orange.svg)](https://ubuntu.com)
 [![Debian](https://img.shields.io/badge/debian-11+-red.svg)](https://debian.org)
@@ -167,7 +167,7 @@ MIT License — см. [LICENSE](LICENSE)
 
 | Метрика | Значение |
 |---------|----------|
-| **Строк кода** | ~937 |
+| **Строк кода** | ~1080 |
 | **Функций** | 31 |
 | **Время установки** | 10-15 мин |
 | **RAM** | 512 MB мин. |
@@ -175,6 +175,13 @@ MIT License — см. [LICENSE](LICENSE)
 ---
 
 ## 🎯 Changelog
+
+### v1.0.3 (2026-04-01)
+- ✅ Docker: `docker.socket` + UFW `DEFAULT_FORWARD_POLICY`, порты Portainer/Uptime Kuma
+- ✅ Автообновление X-UI по выбранному репозиторию (`XUI_REPO`), не только 3x-ui
+- ✅ SSH: перезапуск через unit `ssh` (Ubuntu/Debian)
+- ✅ Архитектуры: Hysteria, Tuic, Trojan-Go, Brook; безопасная загрузка (`curl` без обрыва всего скрипта)
+- ✅ Бэкап: корректная дата в логе; WireGuard: `mkdir` для `/etc/wireguard`
 
 ### v1.0.2 (2026-03-31)
 - ✅ Исправлена генерация SSL email
@@ -195,7 +202,7 @@ MIT License — см. [LICENSE](LICENSE)
 
 <div align="center">
 
-**X-UI Ultimate Installer v1.0.2**
+**X-UI Ultimate Installer v1.0.3**
 
 [⬆️ Наверх](#x-ui-ultimate-installer)
 
