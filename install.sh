@@ -34,6 +34,20 @@ error_log() { echo -e "${RED}[$(date '+%Y-%m-%d %H:%M:%S')] ОШИБКА:${NC} $
 success_log() { echo -e "${GREEN}[$(date '+%Y-%m-%d %H:%M:%S')] УСПЕХ:${NC} $1"; }
 warn_log() { echo -e "${YELLOW}[$(date '+%Y-%m-%d %H:%M:%S')] ВНИМАНИЕ:${NC} $1"; }
 
+# Сломанные сторонние repo (часто 404 Not Found у packagecloud) ломают весь apt update.
+_apt_cleanup_bad_repos() {
+    rm -f /etc/apt/sources.list.d/*ookla* /etc/apt/sources.list.d/*speedtest* 2>/dev/null || true
+    sed -i '/packagecloud\.io\/ookla\/speedtest-cli/d' /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null || true
+}
+
+# Одна строка в crontab пользователя root (без дублей при повторном запуске)
+_cron_set_line() {
+    local line="$1"
+    ( crontab -l 2>/dev/null | grep -vF "$line" || true
+      echo "$line"
+    ) | crontab -
+}
+
 # Проверка root
 if [[ $EUID -ne 0 ]]; then
     error_log "Запустите от root"
@@ -194,11 +208,28 @@ read -r -p "Очистка системы? (y/n): " ENABLE_CLEANUP
 read -r -p "Speedtest? (y/n): " INSTALL_SPEEDTEST
 read -r -p "ZeroSSL вместо Let's Encrypt? (y/n): " USE_ZEROSL
 
+# HTTPS для Portainer / Uptime Kuma: Nginx + тот же LE-сертификат (SAN), поддомены в DNS
+USE_DOCKER_SUBDOMAIN_TLS="n"
+PORTAINER_HTTPS_HOST=""
+KUMA_HTTPS_HOST=""
+if [[ "$INSTALL_DOCKER" == "y" ]] && { [[ "$INSTALL_PORTAINER" == "y" ]] || [[ "$SETUP_UPTIME_KUMA" == "y" ]]; }; then
+    read -r -p "HTTPS через Nginx для Docker UI (portainer.${DOMAIN}, kuma.${DOMAIN} — только выбранные; нужен DNS) (y/n): " USE_DOCKER_SUBDOMAIN_TLS
+    if [[ "$USE_DOCKER_SUBDOMAIN_TLS" == "y" ]]; then
+        [[ "$INSTALL_PORTAINER" == "y" ]] && PORTAINER_HTTPS_HOST="portainer.${DOMAIN}"
+        [[ "$SETUP_UPTIME_KUMA" == "y" ]] && KUMA_HTTPS_HOST="kuma.${DOMAIN}"
+    fi
+fi
+
 # =============================================================================
 # Обновление
 # =============================================================================
 log "Обновление..."
-apt update && apt upgrade -y
+if ! apt-get update -qq; then
+    warn_log "apt update завершился с ошибкой (часто 404 у стороннего repo, напр. Ookla) — чистка источников и повтор"
+    _apt_cleanup_bad_repos
+    apt-get update -qq || warn_log "apt update всё ещё с ошибкой — проверьте /etc/apt/sources.list.d/"
+fi
+apt-get upgrade -y
 
 log "Зависимости..."
 apt install -y curl wget socat unzip tar gnupg2 lsb-release ca-certificates \
@@ -236,12 +267,16 @@ if [[ "$ENABLE_OBFUSCATION" == "y" || "$ENABLE_SHADOWTLS" == "y" || "$ENABLE_HYS
                 ;;
         esac
         if [[ -n "$HY_BIN" ]]; then
-            HY_VER=$(curl -s https://api.github.com/repos/apernet/hysteria/releases/latest | grep -oP '"tag_name": "\Kapp/v[0-9.]+' || echo "app/v2.5.6")
-            if curl -fsSL "https://github.com/apernet/hysteria/releases/download/${HY_VER}/${HY_BIN}" -o /usr/local/bin/hysteria; then
-                chmod +x /usr/local/bin/hysteria
+            HY_URL=$(curl -sL https://api.github.com/repos/apernet/hysteria/releases/latest | jq -r --arg n "$HY_BIN" '.assets[] | select(.name == $n) | .browser_download_url' | head -n1)
+            if [[ -n "$HY_URL" && "$HY_URL" != "null" ]]; then
+                if curl -fsSL "$HY_URL" -o /usr/local/bin/hysteria; then
+                    chmod +x /usr/local/bin/hysteria
+                else
+                    warn_log "Hysteria: не удалось скачать бинарник"
+                    rm -f /usr/local/bin/hysteria
+                fi
             else
-                warn_log "Hysteria: не удалось скачать ${HY_VER}/${HY_BIN}"
-                rm -f /usr/local/bin/hysteria
+                warn_log "Hysteria: в последнем релизе нет asset «${HY_BIN}»"
             fi
         fi
     fi
@@ -256,20 +291,30 @@ if [[ "$ENABLE_OBFUSCATION" == "y" || "$ENABLE_SHADOWTLS" == "y" || "$ENABLE_HYS
                 ;;
         esac
         if [[ -n "$TUIC_LA" ]]; then
-            TUIC_RAW=$(curl -s https://api.github.com/repos/EAimTY/tuic/releases/latest | grep -oP '"tag_name": "\K[^"]+' || echo "v1.6.1")
-            TUIC_VER="${TUIC_RAW#v}"
-            if curl -fsSL "https://github.com/EAimTY/tuic/releases/download/${TUIC_RAW}/tuic-server-${TUIC_VER}-${TUIC_LA}" -o /usr/local/bin/tuic; then
-                chmod +x /usr/local/bin/tuic
+            # Актуальные релизы: https://github.com/tuic-protocol/tuic (старый EAimTY/tuic может давать 404)
+            TUIC_META=$(curl -sL https://api.github.com/repos/tuic-protocol/tuic/releases/latest)
+            TUIC_URL=""
+            for _tuc_suf in "$TUIC_LA" "${TUIC_LA/-musl/-gnu}"; do
+                _u=$(echo "$TUIC_META" | jq -r --arg suf "$_tuc_suf" '.assets[] | select(.name | test("^tuic-server-.+-" + $suf + "$")) | .browser_download_url' | head -n1)
+                if [[ -n "$_u" && "$_u" != "null" ]]; then
+                    TUIC_URL="$_u"
+                    break
+                fi
+            done
+            if [[ -n "$TUIC_URL" ]]; then
+                if curl -fsSL "$TUIC_URL" -o /usr/local/bin/tuic; then
+                    chmod +x /usr/local/bin/tuic
+                else
+                    warn_log "Tuic: не удалось скачать ${TUIC_URL}"
+                    rm -f /usr/local/bin/tuic
+                fi
             else
-                warn_log "Tuic: не удалось скачать tuic-server-${TUIC_VER}-${TUIC_LA}"
-                rm -f /usr/local/bin/tuic
+                warn_log "Tuic: не найден подходящий asset для ${TUIC_LA} в репозитории tuic-protocol/tuic"
             fi
         fi
     fi
     
     if [[ "$ENABLE_SHADOWTLS" == "y" ]]; then
-        STLS_VER=$(curl -s https://api.github.com/repos/ihciah/shadow-tls/releases/latest | grep -oP '"tag_name": "\K[^"]+')
-        [[ -z "$STLS_VER" ]] && STLS_VER="v0.2.25"
         case $ARCH in
             x86_64) STLS_BIN="shadow-tls-x86_64-unknown-linux-musl" ;;
             aarch64) STLS_BIN="shadow-tls-aarch64-unknown-linux-musl" ;;
@@ -277,8 +322,17 @@ if [[ "$ENABLE_OBFUSCATION" == "y" || "$ENABLE_SHADOWTLS" == "y" || "$ENABLE_HYS
             armv6l) STLS_BIN="shadow-tls-arm-unknown-linux-musleabi" ;;
             *) error_log "ShadowTLS: архитектура $ARCH не поддерживается"; exit 1 ;;
         esac
-        curl -fL "https://github.com/ihciah/shadow-tls/releases/download/${STLS_VER}/${STLS_BIN}" -o /usr/local/bin/shadow-tls
-        chmod +x /usr/local/bin/shadow-tls
+        STLS_URL=$(curl -sL https://api.github.com/repos/ihciah/shadow-tls/releases/latest | jq -r --arg n "$STLS_BIN" '.assets[] | select(.name == $n) | .browser_download_url' | head -n1)
+        if [[ -n "$STLS_URL" && "$STLS_URL" != "null" ]]; then
+            if curl -fsSL "$STLS_URL" -o /usr/local/bin/shadow-tls; then
+                chmod +x /usr/local/bin/shadow-tls
+            else
+                warn_log "ShadowTLS: не удалось скачать ${STLS_BIN}"
+                rm -f /usr/local/bin/shadow-tls
+            fi
+        else
+            warn_log "ShadowTLS: не найден asset «${STLS_BIN}» в последнем релизе"
+        fi
     fi
 fi
 
@@ -336,10 +390,14 @@ if [[ "$ENABLE_HYSTERIA" == "y" ]]; then
     ufw allow 443/udp
 fi
 if [[ "$INSTALL_PORTAINER" == "y" ]]; then
-    ufw allow 9000/tcp comment 'Portainer'
+    if [[ "$USE_DOCKER_SUBDOMAIN_TLS" != "y" ]]; then
+        ufw allow 9000/tcp comment 'Portainer'
+    fi
 fi
 if [[ "$SETUP_UPTIME_KUMA" == "y" && "$INSTALL_DOCKER" == "y" ]]; then
-    ufw allow 3001/tcp comment 'Uptime-Kuma'
+    if [[ "$USE_DOCKER_SUBDOMAIN_TLS" != "y" ]]; then
+        ufw allow 3001/tcp comment 'Uptime-Kuma'
+    fi
 fi
 
 echo "y" | ufw enable
@@ -434,16 +492,32 @@ systemctl enable fail2ban
 # =============================================================================
 DOCKER_OK=false
 if [[ "$INSTALL_DOCKER" == "y" ]]; then
-    if curl -fsSL https://get.docker.com | sh; then
+    log "Docker..."
+
+    # Повторный запуск скрипта: Docker может быть уже установлен — тогда не трогаем get.docker.com,
+    # просто приводим сервисы в нормальное состояние.
+    if ! command -v docker &>/dev/null; then
+        if ! curl -fsSL https://get.docker.com | sh; then
+            error_log "Docker ошибка"
+            INSTALL_DOCKER="n"
+            INSTALL_PORTAINER="n"
+        fi
+    fi
+
+    if [[ "$INSTALL_DOCKER" == "y" ]]; then
         systemctl daemon-reload 2>/dev/null || true
-        systemctl reset-failed docker.service docker.socket 2>/dev/null || true
-        systemctl unmask docker.socket docker.service 2>/dev/null || true
-        # Ubuntu/Debian: dockerd слушает через socket activation; без активного docker.socket
-        # падает с "no sockets found via socket activation".
+        systemctl reset-failed docker.service docker.socket containerd.service 2>/dev/null || true
+        systemctl unmask docker.socket docker.service containerd.service 2>/dev/null || true
+
+        # containerd должен быть запущен; иначе dockerd может падать.
+        systemctl enable --now containerd 2>/dev/null || true
+
+        # Ubuntu/Debian: dockerd часто слушает через socket activation (fd://).
         if systemctl cat docker.socket &>/dev/null; then
             systemctl enable --now docker.socket
         fi
         systemctl enable --now docker.service
+
         if systemctl is-active --quiet docker; then
             DOCKER_OK=true
         else
@@ -451,18 +525,7 @@ if [[ "$INSTALL_DOCKER" == "y" ]]; then
             INSTALL_DOCKER="n"
             INSTALL_PORTAINER="n"
         fi
-    else
-        error_log "Docker ошибка"
-        INSTALL_DOCKER="n"
-        INSTALL_PORTAINER="n"
     fi
-fi
-
-if [[ "$INSTALL_PORTAINER" == "y" && "$DOCKER_OK" == "true" ]]; then
-    docker volume create portainer_data
-    docker run -d --name portainer --restart=always -p 9000:9000 \
-        -v /var/run/docker.sock:/var/run/docker.sock -v portainer_data:/data \
-        portainer/portainer-ce:latest
 fi
 
 # =============================================================================
@@ -500,7 +563,12 @@ esac
 log "Загрузка X-UI ${LATEST_VER}..."
 XUI_TARBALL="/root/${FNAME}.tar.gz"
 XUI_TMPDIR="$(mktemp -d)"
-curl -L "https://github.com/${XUI_REPO}/releases/download/${LATEST_VER}/${FNAME}.tar.gz" -o "${XUI_TARBALL}"
+XUI_DL_URL="https://github.com/${XUI_REPO}/releases/download/${LATEST_VER}/${FNAME}.tar.gz"
+if ! curl -fsSL "$XUI_DL_URL" -o "${XUI_TARBALL}"; then
+    error_log "Загрузка X-UI: 404 или сеть — ${XUI_DL_URL}"
+    rm -rf "${XUI_TMPDIR}"
+    exit 1
+fi
 tar -xzf "${XUI_TARBALL}" -C "${XUI_TMPDIR}"
 
 # В разных релизах папка внутри архива может называться по-разному (часто просто `x-ui/`).
@@ -573,8 +641,14 @@ fi
 # =============================================================================
 if [[ "$ENABLE_2FA" == "y" ]]; then
     apt install -y libpam-google-authenticator qrencode
-    google-authenticator -t -d -f -r 3 -R 30 -w 3
-    echo "auth required pam_google_authenticator.so" >> /etc/pam.d/common-auth
+    if [[ ! -f /root/.google_authenticator ]]; then
+        google-authenticator -t -d -f -r 3 -R 30 -w 3
+    else
+        warn_log "2FA: /root/.google_authenticator уже есть — пропуск google-authenticator"
+    fi
+    if ! grep -q 'pam_google_authenticator' /etc/pam.d/common-auth; then
+        echo "auth required pam_google_authenticator.so" >> /etc/pam.d/common-auth
+    fi
 fi
 
 # =============================================================================
@@ -583,11 +657,22 @@ fi
 log "SSL..."
 SSL_OK=false
 
+# Один сертификат на основной домен + поддомены Portainer/Kuma (если включены)
+LE_DOMAIN_ARGS=( -d "$DOMAIN" )
+[[ -n "$PORTAINER_HTTPS_HOST" ]] && LE_DOMAIN_ARGS+=( -d "$PORTAINER_HTTPS_HOST" )
+[[ -n "$KUMA_HTTPS_HOST" ]] && LE_DOMAIN_ARGS+=( -d "$KUMA_HTTPS_HOST" )
+
+systemctl stop nginx 2>/dev/null || true
+
 if [[ "$USE_ZEROSL" == "y" ]]; then
     # shellcheck disable=SC1090
     if curl https://get.acme.sh | sh -s email="${SSL_EMAIL}" && source ~/.bashrc; then
         ~/.acme.sh/acme.sh --register-account -m "${SSL_EMAIL}"
-        if ~/.acme.sh/acme.sh --issue -d "${DOMAIN}" --standalone --force; then
+        ACME_ISSUE=( --issue -d "$DOMAIN" )
+        [[ -n "$PORTAINER_HTTPS_HOST" ]] && ACME_ISSUE+=( -d "$PORTAINER_HTTPS_HOST" )
+        [[ -n "$KUMA_HTTPS_HOST" ]] && ACME_ISSUE+=( -d "$KUMA_HTTPS_HOST" )
+        ACME_ISSUE+=( --standalone --force )
+        if ~/.acme.sh/acme.sh "${ACME_ISSUE[@]}"; then
             mkdir -p /usr/local/x-ui/cert
             ~/.acme.sh/acme.sh --install-cert -d "${DOMAIN}" \
                 --cert-file /usr/local/x-ui/cert/server.crt \
@@ -603,7 +688,17 @@ fi
 
 if [[ "$USE_ZEROSL" != "y" ]]; then
     apt install -y certbot
-    if certbot certonly --standalone -d "$DOMAIN" --non-interactive --agree-tos --email "${SSL_EMAIL}" --force-renewal; then
+    if [[ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]]; then
+        warn_log "SSL: Let's Encrypt — обновление/расширение сертификата и копирование в x-ui"
+        certbot certonly --standalone --cert-name "$DOMAIN" --expand --non-interactive --agree-tos --email "${SSL_EMAIL}" "${LE_DOMAIN_ARGS[@]}" || \
+            warn_log "certbot expand: если не прошло — проверьте DNS для поддоменов"
+        certbot renew --non-interactive --cert-name "$DOMAIN" 2>/dev/null || certbot renew --non-interactive 2>/dev/null || true
+        mkdir -p /usr/local/x-ui/cert
+        cp /etc/letsencrypt/live/"$DOMAIN"/fullchain.pem /usr/local/x-ui/cert/server.crt
+        cp /etc/letsencrypt/live/"$DOMAIN"/privkey.pem /usr/local/x-ui/cert/server.key
+        chmod 600 /usr/local/x-ui/cert/server.key
+        SSL_OK=true
+    elif certbot certonly --standalone --non-interactive --agree-tos --email "${SSL_EMAIL}" "${LE_DOMAIN_ARGS[@]}"; then
         mkdir -p /usr/local/x-ui/cert
         cp /etc/letsencrypt/live/"$DOMAIN"/fullchain.pem /usr/local/x-ui/cert/server.crt
         cp /etc/letsencrypt/live/"$DOMAIN"/privkey.pem /usr/local/x-ui/cert/server.key
@@ -640,6 +735,70 @@ else
     SSL_KEY_PATH="/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
 fi
 
+DOCKER_NGINX_EXTRA=""
+if [[ -n "$PORTAINER_HTTPS_HOST" ]]; then
+    DOCKER_NGINX_EXTRA+=$(cat <<PNBLK
+
+server {
+    listen 80;
+    ${IPV6_HTTP}
+    server_name ${PORTAINER_HTTPS_HOST};
+    return 301 https://\$host\$request_uri;
+}
+server {
+    listen 443 ssl http2;
+    ${IPV6_HTTPS}
+    server_name ${PORTAINER_HTTPS_HOST};
+    ssl_certificate ${SSL_CERT_PATH};
+    ssl_certificate_key ${SSL_KEY_PATH};
+    ssl_protocols TLSv1.2 TLSv1.3;
+    location / {
+        proxy_pass http://127.0.0.1:9000;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+    server_tokens off;
+}
+PNBLK
+)
+fi
+if [[ -n "$KUMA_HTTPS_HOST" ]]; then
+    DOCKER_NGINX_EXTRA+=$(cat <<KMBLK
+
+server {
+    listen 80;
+    ${IPV6_HTTP}
+    server_name ${KUMA_HTTPS_HOST};
+    return 301 https://\$host\$request_uri;
+}
+server {
+    listen 443 ssl http2;
+    ${IPV6_HTTPS}
+    server_name ${KUMA_HTTPS_HOST};
+    ssl_certificate ${SSL_CERT_PATH};
+    ssl_certificate_key ${SSL_KEY_PATH};
+    ssl_protocols TLSv1.2 TLSv1.3;
+    location / {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+    server_tokens off;
+}
+KMBLK
+)
+fi
+
 cat > /etc/nginx/sites-available/default << NGC
 server {
     listen 80;
@@ -659,10 +818,36 @@ server {
     location / { try_files \$uri \$uri/ =404; }
     server_tokens off;
 }
+${DOCKER_NGINX_EXTRA}
 NGC
 
 systemctl restart nginx
 systemctl enable nginx
+
+# Portainer / Uptime Kuma — после Nginx (TLS на :443, backend на loopback)
+if [[ "$INSTALL_PORTAINER" == "y" && "$DOCKER_OK" == "true" ]]; then
+    docker volume create portainer_data
+    docker rm -f portainer 2>/dev/null || true
+    if [[ "$USE_DOCKER_SUBDOMAIN_TLS" == "y" ]]; then
+        docker run -d --name portainer --restart=always -p 127.0.0.1:9000:9000 \
+            -v /var/run/docker.sock:/var/run/docker.sock -v portainer_data:/data \
+            portainer/portainer-ce:latest
+    else
+        docker run -d --name portainer --restart=always -p 9000:9000 \
+            -v /var/run/docker.sock:/var/run/docker.sock -v portainer_data:/data \
+            portainer/portainer-ce:latest
+    fi
+fi
+if [[ "$SETUP_UPTIME_KUMA" == "y" && "$DOCKER_OK" == "true" ]]; then
+    docker rm -f uptime-kuma 2>/dev/null || true
+    if [[ "$USE_DOCKER_SUBDOMAIN_TLS" == "y" ]]; then
+        docker run -d --name uptime-kuma --restart=always -p 127.0.0.1:3001:3001 \
+            -v uptime-kuma:/app/data louislam/uptime-kuma:1
+    else
+        docker run -d --name uptime-kuma --restart=always -p 3001:3001 \
+            -v uptime-kuma:/app/data louislam/uptime-kuma:1
+    fi
+fi
 
 # =============================================================================
 # Протоколы
@@ -734,17 +919,33 @@ if [[ "$INSTALL_SINGBOX" == "y" ]]; then
         *) error_log "sing-box: архитектура $ARCH не поддерживается"; exit 1 ;;
     esac
     SB_TGZ="sing-box-${SB_NOPREFIX}-linux-${SB_LA}.tar.gz"
-    curl -fL "https://github.com/SagerNet/sing-box/releases/download/${SB_VER}/${SB_TGZ}" -o /tmp/sb.tar.gz
-    tar -xzf /tmp/sb.tar.gz -C /tmp/
-    mv "/tmp/sing-box-${SB_NOPREFIX}-linux-${SB_LA}/sing-box" /usr/local/bin/
-    rm -rf /tmp/sb.tar.gz /tmp/sing-box-*
-    chmod +x /usr/local/bin/sing-box
+    SB_DL="https://github.com/SagerNet/sing-box/releases/download/${SB_VER}/${SB_TGZ}"
+    if curl -fsSL "$SB_DL" -o /tmp/sb.tar.gz; then
+        tar -xzf /tmp/sb.tar.gz -C /tmp/
+        mv "/tmp/sing-box-${SB_NOPREFIX}-linux-${SB_LA}/sing-box" /usr/local/bin/
+        rm -rf /tmp/sb.tar.gz /tmp/sing-box-*
+        chmod +x /usr/local/bin/sing-box
+    else
+        warn_log "sing-box: не удалось скачать ${SB_TGZ} (404 или сеть)"
+        rm -f /tmp/sb.tar.gz
+    fi
 fi
 
 # =============================================================================
 # Данные
 # =============================================================================
 log "Сохранение..."
+
+PORTAINER_CRED_LINE=""
+KUMA_CRED_LINE=""
+if [[ -n "$PORTAINER_HTTPS_HOST" ]]; then
+    PORTAINER_CRED_LINE="Portainer (HTTPS): https://${PORTAINER_HTTPS_HOST}
+"
+fi
+if [[ -n "$KUMA_HTTPS_HOST" ]]; then
+    KUMA_CRED_LINE="Uptime Kuma (HTTPS): https://${KUMA_HTTPS_HOST}
+"
+fi
 
 cat > /root/x-ui-credentials.txt << CREDS
 ╔═══════════════════════════════════════════════════════════╗
@@ -758,7 +959,7 @@ URL: https://${DOMAIN}:${RANDOM_PORT}
 Пароль: ${XUI_PASSWORD}
 SSH Порт: ${SSH_PORT}
 API Key: ${API_KEY}
-╠═══════════════════════════════════════════════════════════╣
+${PORTAINER_CRED_LINE}${KUMA_CRED_LINE}╠═══════════════════════════════════════════════════════════╣
 Команды: x-ui start|stop|restart|status|log
 ╚═══════════════════════════════════════════════════════════╝
 CREDS
@@ -782,7 +983,7 @@ if [[ "\$CUR" != "\$LAT" ]]; then
 fi
 AUTOU
     chmod +x /usr/local/x-ui/auto-update.sh
-    (crontab -l 2>/dev/null; echo "0 3 * * * /usr/local/x-ui/auto-update.sh") | crontab -
+    _cron_set_line "0 3 * * * /usr/local/x-ui/auto-update.sh"
 fi
 
 # =============================================================================
@@ -799,7 +1000,7 @@ cd "\${BD}" && ls -t *.bak 2>/dev/null | tail -n +11 | xargs -r rm
 echo "[\$(date)] Backup: \${DT}" >> /var/log/x-ui-backup.log
 BACKUP
     chmod +x /usr/local/x-ui/backup.sh
-    (crontab -l 2>/dev/null; echo "0 3 * * * /usr/local/x-ui/backup.sh") | crontab -
+    _cron_set_line "0 3 * * * /usr/local/x-ui/backup.sh"
 fi
 
 # =============================================================================
@@ -954,19 +1155,13 @@ CONVSH
 fi
 
 # =============================================================================
-# Uptime Kuma
-# =============================================================================
-if [[ "$SETUP_UPTIME_KUMA" == "y" && "$DOCKER_OK" == "true" ]]; then
-    docker run -d --name uptime-kuma --restart=always -p 3001:3001 \
-        -v uptime-kuma:/app/data louislam/uptime-kuma:1
-fi
-
-# =============================================================================
 # Speedtest
 # =============================================================================
 if [[ "$INSTALL_SPEEDTEST" == "y" ]]; then
     log "Speedtest..."
-    # Репозиторий Ookla: после script.deb.sh нужен apt update; для части релизов Ubuntu/Debian пакета speedtest ещё нет.
+    # Репозиторий Ookla (packagecloud):
+    # - на новых релизах (например Ubuntu noble) может не быть Release → apt update падает
+    # - при ошибке откатываем repo и ставим speedtest-cli из репозитория дистрибутива
     ST_SH=$(mktemp)
     if curl -fsSL https://packagecloud.io/install/repositories/ookla/speedtest-cli/script.deb.sh -o "${ST_SH}"; then
         bash "${ST_SH}" || warn_log "Ookla: ошибка при подключении репозитория (продолжаем с apt)"
@@ -974,13 +1169,22 @@ if [[ "$INSTALL_SPEEDTEST" == "y" ]]; then
         warn_log "Ookla: не удалось скачать script.deb.sh"
     fi
     rm -f "${ST_SH}"
-    apt-get update -qq
-    if apt-get install -y speedtest; then
-        success_log "Установлен speedtest (Ookla)"
+    if apt-get update -qq; then
+        if apt-get install -y speedtest; then
+            success_log "Установлен speedtest (Ookla)"
+        else
+            warn_log "Пакет speedtest не найден — ставлю speedtest-cli из репозитория"
+            apt-get install -y speedtest-cli
+            success_log "Команда: speedtest-cli (дистрибутив, не бинарник Ookla)"
+        fi
     else
-        warn_log "Пакет speedtest не найден (часто на новых релизах ОС) — ставлю speedtest-cli из репозитория"
+        warn_log "APT update упал (часто из-за packagecloud Release). Убираю repo Ookla и ставлю speedtest-cli."
+        rm -f /etc/apt/sources.list.d/*ookla* /etc/apt/sources.list.d/*speedtest* 2>/dev/null || true
+        # На всякий случай — удаляем строки packagecloud ookla из любых *.list
+        sed -i '/packagecloud\.io\/ookla\/speedtest-cli/d' /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null || true
+        apt-get update -qq || true
         apt-get install -y speedtest-cli
-        success_log "Команда: speedtest-cli (дистрибутив, не бинарник Ookla)"
+        success_log "Команда: speedtest-cli (дистрибутив, репозиторий Ookla отключён)"
     fi
 fi
 
@@ -1008,7 +1212,7 @@ if [[ $D -gt 90 ]]; then
 fi
 HLTHSH
 chmod +x /usr/local/x-ui/health-check.sh
-(crontab -l 2>/dev/null; echo "*/5 * * * * /usr/local/x-ui/health-check.sh") | crontab -
+_cron_set_line "*/5 * * * * /usr/local/x-ui/health-check.sh"
 
 # =============================================================================
 # Очистка
@@ -1083,10 +1287,18 @@ if [[ "$CREATE_API" == "y" ]]; then
     echo -e "  API: http://localhost:8080/api/"
 fi
 if [[ "$SETUP_UPTIME_KUMA" == "y" && "$DOCKER_OK" == "true" ]]; then
-    echo -e "  Uptime Kuma: http://${DOMAIN}:3001"
+    if [[ "$USE_DOCKER_SUBDOMAIN_TLS" == "y" && -n "$KUMA_HTTPS_HOST" ]]; then
+        echo -e "  Uptime Kuma: ${GREEN}https://${KUMA_HTTPS_HOST}${NC}"
+    else
+        echo -e "  Uptime Kuma: http://${DOMAIN}:3001"
+    fi
 fi
 if [[ "$INSTALL_PORTAINER" == "y" && "$DOCKER_OK" == "true" ]]; then
-    echo -e "  Portainer:   http://${DOMAIN}:9000"
+    if [[ "$USE_DOCKER_SUBDOMAIN_TLS" == "y" && -n "$PORTAINER_HTTPS_HOST" ]]; then
+        echo -e "  Portainer:   ${GREEN}https://${PORTAINER_HTTPS_HOST}${NC}"
+    else
+        echo -e "  Portainer:   http://${DOMAIN}:9000"
+    fi
 fi
 
 if [[ "$SETUP_SSH_HARDENING" == "y" && "$SSH_PORT" != "22" ]]; then
