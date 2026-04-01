@@ -208,6 +208,7 @@ apt install -y curl wget socat unzip tar gnupg2 lsb-release ca-certificates \
 XUI_USERNAME="admin$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 4)"
 XUI_PASSWORD=$(head /dev/urandom | tr -dc 'A-Za-z0-9@#%_' | head -c 20)
 API_KEY=$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 32)
+ARCH=$(uname -m)
 
 log "Порт: ${CYAN}${RANDOM_PORT}${NC}"
 log "Логин: ${CYAN}${XUI_USERNAME}${NC}"
@@ -219,10 +220,11 @@ log "Пароль: ${CYAN}${XUI_PASSWORD}${NC}"
 if [[ "$ENABLE_OBFUSCATION" == "y" || "$ENABLE_SHADOWTLS" == "y" || "$ENABLE_HYSTERIA" == "y" || "$ENABLE_TUIC" == "y" ]]; then
     log "Протоколы обхода..."
     
-    curl -L -o /tmp/v2ray.sh https://raw.githubusercontent.com/v2fly/fhs-install-v2ray/master/install-release.sh
+    curl -fsSL -o /tmp/v2ray.sh https://raw.githubusercontent.com/v2fly/fhs-install-v2ray/master/install-release.sh
     bash /tmp/v2ray.sh --force
     rm -f /tmp/v2ray.sh
-    
+    systemctl enable --now v2ray 2>/dev/null || true
+
     if [[ "$ENABLE_HYSTERIA" == "y" ]]; then
         HY_VER=$(curl -s https://api.github.com/repos/apernet/hysteria/releases/latest | grep -oP '"tag_name": "\Kapp/v[0-9.]+' || echo "app/v2.5.6")
         curl -L "https://github.com/apernet/hysteria/releases/download/${HY_VER}/hysteria-linux-amd64" -o /usr/local/bin/hysteria
@@ -236,9 +238,17 @@ if [[ "$ENABLE_OBFUSCATION" == "y" || "$ENABLE_SHADOWTLS" == "y" || "$ENABLE_HYS
     fi
     
     if [[ "$ENABLE_SHADOWTLS" == "y" ]]; then
-        curl -L "https://github.com/ihciah/shadow-tls/releases/download/v1.3.0/shadow-tls-x86_64-unknown-linux-musl.tar.gz" -o /tmp/stls.tar.gz
-        tar -xzf /tmp/stls.tar.gz -C /usr/local/bin/
-        rm -f /tmp/stls.tar.gz
+        STLS_VER=$(curl -s https://api.github.com/repos/ihciah/shadow-tls/releases/latest | grep -oP '"tag_name": "\K[^"]+')
+        [[ -z "$STLS_VER" ]] && STLS_VER="v0.2.25"
+        case $ARCH in
+            x86_64) STLS_BIN="shadow-tls-x86_64-unknown-linux-musl" ;;
+            aarch64) STLS_BIN="shadow-tls-aarch64-unknown-linux-musl" ;;
+            armv7l) STLS_BIN="shadow-tls-armv7-unknown-linux-musleabihf" ;;
+            armv6l) STLS_BIN="shadow-tls-arm-unknown-linux-musleabi" ;;
+            *) error_log "ShadowTLS: архитектура $ARCH не поддерживается"; exit 1 ;;
+        esac
+        curl -fL "https://github.com/ihciah/shadow-tls/releases/download/${STLS_VER}/${STLS_BIN}" -o /usr/local/bin/shadow-tls
+        chmod +x /usr/local/bin/shadow-tls
     fi
 fi
 
@@ -421,7 +431,6 @@ if [[ -z "$LATEST_VER" ]]; then
     exit 1
 fi
 
-ARCH=$(uname -m)
 case $ARCH in
     x86_64) FNAME="x-ui-linux-amd64" ;;
     aarch64) FNAME="x-ui-linux-arm64" ;;
@@ -599,9 +608,24 @@ fi
 
 if [[ "$INSTALL_SINGBOX" == "y" ]]; then
     SB_VER=$(curl -s https://api.github.com/repos/SagerNet/sing-box/releases/latest | grep -oP '"tag_name": "\K[v0-9.]+')
-    curl -L "https://github.com/SagerNet/sing-box/releases/download/${SB_VER}/sing-box-${SB_VER}-linux-amd64.tar.gz" -o /tmp/sb.tar.gz
+    if [[ -z "$SB_VER" ]]; then
+        error_log "sing-box: версия не получена"
+        exit 1
+    fi
+    SB_NOPREFIX="${SB_VER#v}"
+    case $ARCH in
+        x86_64) SB_LA=amd64 ;;
+        aarch64) SB_LA=arm64 ;;
+        armv7l) SB_LA=armv7 ;;
+        armv6l) SB_LA=armv6 ;;
+        i686|i386) SB_LA=386 ;;
+        riscv64) SB_LA=riscv64 ;;
+        *) error_log "sing-box: архитектура $ARCH не поддерживается"; exit 1 ;;
+    esac
+    SB_TGZ="sing-box-${SB_NOPREFIX}-linux-${SB_LA}.tar.gz"
+    curl -fL "https://github.com/SagerNet/sing-box/releases/download/${SB_VER}/${SB_TGZ}" -o /tmp/sb.tar.gz
     tar -xzf /tmp/sb.tar.gz -C /tmp/
-    mv "/tmp/sing-box-${SB_VER}-linux-amd64/sing-box" /usr/local/bin/
+    mv "/tmp/sing-box-${SB_NOPREFIX}-linux-${SB_LA}/sing-box" /usr/local/bin/
     rm -rf /tmp/sb.tar.gz /tmp/sing-box-*
     chmod +x /usr/local/bin/sing-box
 fi
