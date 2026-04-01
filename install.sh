@@ -965,8 +965,23 @@ fi
 # Speedtest
 # =============================================================================
 if [[ "$INSTALL_SPEEDTEST" == "y" ]]; then
-    curl -s https://packagecloud.io/install/repositories/ookla/speedtest-cli/script.deb.sh | bash
-    apt install -y speedtest
+    log "Speedtest..."
+    # Репозиторий Ookla: после script.deb.sh нужен apt update; для части релизов Ubuntu/Debian пакета speedtest ещё нет.
+    ST_SH=$(mktemp)
+    if curl -fsSL https://packagecloud.io/install/repositories/ookla/speedtest-cli/script.deb.sh -o "${ST_SH}"; then
+        bash "${ST_SH}" || warn_log "Ookla: ошибка при подключении репозитория (продолжаем с apt)"
+    else
+        warn_log "Ookla: не удалось скачать script.deb.sh"
+    fi
+    rm -f "${ST_SH}"
+    apt-get update -qq
+    if apt-get install -y speedtest; then
+        success_log "Установлен speedtest (Ookla)"
+    else
+        warn_log "Пакет speedtest не найден (часто на новых релизах ОС) — ставлю speedtest-cli из репозитория"
+        apt-get install -y speedtest-cli
+        success_log "Команда: speedtest-cli (дистрибутив, не бинарник Ookla)"
+    fi
 fi
 
 # =============================================================================
