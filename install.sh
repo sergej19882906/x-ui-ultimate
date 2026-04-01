@@ -220,7 +220,7 @@ if [[ "$ENABLE_OBFUSCATION" == "y" || "$ENABLE_SHADOWTLS" == "y" || "$ENABLE_HYS
     log "Протоколы обхода..."
     
     curl -L -o /tmp/v2ray.sh https://raw.githubusercontent.com/v2fly/fhs-install-v2ray/master/install-release.sh
-    bash /tmp/v2ray.sh --version latest
+    bash /tmp/v2ray.sh --force
     rm -f /tmp/v2ray.sh
     
     if [[ "$ENABLE_HYSTERIA" == "y" ]]; then
