@@ -280,12 +280,14 @@ ufw allow 22/tcp comment 'SSH'
 if [[ "$SETUP_SSH_HARDENING" == "y" && "$SSH_PORT" != "22" ]]; then
     ufw allow "${SSH_PORT}"/tcp comment 'SSH2'
 fi
-ufw allow 80/tcp 443/tcp ${RANDOM_PORT}/tcp
-if [[ "$ENABLE_IPV6" == "y" ]]; then
-    ufw allow 22/tcp 80/tcp 443/tcp ${RANDOM_PORT}/tcp comment 'IPv6'
-fi
+# UFW: один порт на команду (несколько аргументов → ERROR: Wrong number of arguments)
+ufw allow 80/tcp
+ufw allow 443/tcp
+ufw allow "${RANDOM_PORT}"/tcp
 if [[ "$ENABLE_OBFUSCATION" == "y" ]]; then
-    ufw allow 8080/tcp 8443/tcp 2053/tcp 2083/tcp 2087/tcp 2096/tcp
+    for _ufw_p in 8080 8443 2053 2083 2087 2096; do
+        ufw allow "${_ufw_p}"/tcp
+    done
 fi
 if [[ "$ENABLE_WIREGUARD" == "y" ]]; then
     ufw allow 51820/udp
