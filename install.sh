@@ -658,10 +658,77 @@ if [[ -f /usr/local/x-ui/x-ui ]]; then
     chmod +x /usr/local/x-ui/x-ui
 fi
 
-# Symlink для команды x-ui
+# Wrapper-скрипт для команды x-ui (интерактивное меню + CLI команды)
 if [[ ! -f /usr/local/bin/x-ui ]]; then
-    ln -sf /usr/local/x-ui/x-ui /usr/local/bin/x-ui
-    log "Symlink: /usr/local/bin/x-ui -> /usr/local/x-ui/x-ui"
+    cat > /usr/local/bin/x-ui << 'XUIWRAPPER'
+#!/bin/bash
+XUI_BIN="/usr/local/x-ui/x-ui"
+
+menu() {
+    echo "╔═══════════════════════════════════════════════════════════╗"
+    echo "║              X-UI Panel Management                        ║"
+    echo "╠═══════════════════════════════════════════════════════════╣"
+    echo "║  1. Запустить X-UI                                        ║"
+    echo "║  2. Остановить X-UI                                       ║"
+    echo "║  3. Перезапустить X-UI                                    ║"
+    echo "║  4. Проверить статус X-UI                                 ║"
+    echo "║  5. Логи X-UI                                             ║"
+    echo "║  6. Обновить X-UI                                         ║"
+    echo "║  7. Сбросить логин/пароль/URI панели                      ║"
+    echo "║  8. Настройки панели                                      ║"
+    echo "║  9. Выйти                                                 ║"
+    echo "╚═══════════════════════════════════════════════════════════╝"
+    read -r -p "Выбор (1-9): " choice
+    case $choice in
+        1) systemctl start x-ui; echo "X-UI запущен" ;;
+        2) systemctl stop x-ui; echo "X-UI остановлен" ;;
+        3) systemctl restart x-ui; echo "X-UI перезапущен" ;;
+        4) systemctl status x-ui --no-pager ;;
+        5) journalctl -u x-ui --no-pager -n 50 ;;
+        6)
+            echo "Обновление..."
+            curl -sL "https://raw.githubusercontent.com/sergej19882906/x-ui-ultimate/main/install.sh" -o /tmp/x-ui-update.sh
+            if [[ -f /tmp/x-ui-update.sh ]]; then
+                bash /tmp/x-ui-update.sh
+            else
+                echo "Ошибка загрузки обновления"
+            fi
+            ;;
+        7)
+            read -r -p "Новый логин: " u
+            read -r -p "Новый пароль: " p
+            read -r -p "Новый URI (Enter=без изменений): " w
+            if [[ -n "$u" && -n "$p" ]]; then
+                if [[ -n "$w" ]]; then
+                    $XUI_BIN setting -username "$u" -password "$p" -webBasePath "/$w"
+                else
+                    $XUI_BIN setting -username "$u" -password "$p"
+                fi
+                systemctl restart x-ui
+                echo "Данные обновлены"
+            fi
+            ;;
+        8) $XUI_BIN ;;
+        9) exit 0 ;;
+        *) echo "Неверный выбор" ;;
+    esac
+}
+
+case "${1:-}" in
+    start)    systemctl start x-ui ;;
+    stop)     systemctl stop x-ui ;;
+    restart)  systemctl restart x-ui ;;
+    status)   systemctl status x-ui --no-pager ;;
+    log)      journalctl -u x-ui --no-pager -n 50 ;;
+    update)   exec $XUI_BIN update ;;
+    version)  exec $XUI_BIN version ;;
+    setting)  exec $XUI_BIN setting "${@:2}" ;;
+    "")       menu ;;
+    *)        exec $XUI_BIN "$@" ;;
+esac
+XUIWRAPPER
+    chmod +x /usr/local/bin/x-ui
+    log "Wrapper x-ui создан: /usr/local/bin/x-ui"
 fi
 
 cat > /etc/systemd/system/x-ui.service << 'XUISVC'
