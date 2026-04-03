@@ -1,4 +1,4 @@
-# 🚀 X-UI Ultimate Installer v1.0.3 — Документация
+# 🚀 X-UI Ultimate Installer v1.1.0 — Документация
 
 ## 📋 Оглавление
 

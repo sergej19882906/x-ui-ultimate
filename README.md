@@ -1,6 +1,6 @@
 # 🚀 X-UI Ultimate Installer
 
-[![Version](https://img.shields.io/badge/version-1.0.3-blue.svg)](https://github.com/sergej19882906/x-ui-ultimate/releases)
+[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](https://github.com/sergej19882906/x-ui-ultimate/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Ubuntu](https://img.shields.io/badge/ubuntu-20.04+-orange.svg)](https://ubuntu.com)
 [![Debian](https://img.shields.io/badge/debian-11+-red.svg)](https://debian.org)
