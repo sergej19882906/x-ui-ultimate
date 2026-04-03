@@ -239,11 +239,14 @@ apt install -y curl wget socat unzip tar gnupg2 lsb-release ca-certificates \
 XUI_USERNAME="admin$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 4)"
 XUI_PASSWORD=$(head /dev/urandom | tr -dc 'A-Za-z0-9@#%_' | head -c 20)
 API_KEY=$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 32)
+# Безопасный URI панели (случайный сложный путь)
+XUI_WEB_PATH=$(head /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 16)
 ARCH=$(uname -m)
 
 log "Порт: ${CYAN}${RANDOM_PORT}${NC}"
 log "Логин: ${CYAN}${XUI_USERNAME}${NC}"
 log "Пароль: ${CYAN}${XUI_PASSWORD}${NC}"
+log "URI панели: ${CYAN}/${XUI_WEB_PATH}${NC}"
 
 # =============================================================================
 # Протоколы
@@ -656,15 +659,16 @@ if [[ -f /usr/local/x-ui/x-ui ]]; then
     # Устанавливаем учётные данные через x-ui commands
     # x-ui username и x-ui password — стандартные команды для 3x-ui
     if [[ -n "$XUI_CERT" && -n "$XUI_KEY" ]]; then
-        log "Настройка SSL для x-ui panel..."
+        log "Настройка SSL и URI для x-ui panel..."
         /usr/local/x-ui/x-ui setting \
             -username "${XUI_USERNAME}" \
             -password "${XUI_PASSWORD}" \
             -port "${RANDOM_PORT}" \
             -cert "$XUI_CERT" \
-            -key "$XUI_KEY" 2>/dev/null && \
-            success_log "Учётные данные и SSL установлены" || \
-            warn_log "x-ui setting с SSL не поддерживается — пробуем без SSL"
+            -key "$XUI_KEY" \
+            -webBasePath "/${XUI_WEB_PATH}" 2>/dev/null && \
+            success_log "Учётные данные, SSL и URI установлены" || \
+            warn_log "x-ui setting с SSL/URI не поддерживается — пробуем без SSL"
     fi
 
     # Fallback: без SSL параметров
@@ -1050,7 +1054,8 @@ cat > /root/x-ui-credentials.txt << CREDS
 Дата: $(date '+%Y-%m-%d %H:%M:%S')
 Домен: ${DOMAIN}
 Порт: ${RANDOM_PORT}
-URL: https://${DOMAIN}:${RANDOM_PORT}
+URI: /${XUI_WEB_PATH}
+URL: https://${DOMAIN}:${RANDOM_PORT}/${XUI_WEB_PATH}
 Логин: ${XUI_USERNAME}
 Пароль: ${XUI_PASSWORD}
 SSH Порт: ${SSH_PORT}
@@ -1403,7 +1408,7 @@ fi
 
 echo ""
 echo -e "${CYAN}🔐 Доступ:${NC}"
-echo -e "  URL:    ${GREEN}https://${DOMAIN}:${RANDOM_PORT}${NC}"
+echo -e "  URL:    ${GREEN}https://${DOMAIN}:${RANDOM_PORT}/${XUI_WEB_PATH}${NC}"
 echo -e "  Логин:  ${YELLOW}${XUI_USERNAME}${NC}"
 echo -e "  Пароль: ${YELLOW}${XUI_PASSWORD}${NC}"
 echo -e "  API:    ${YELLOW}${API_KEY}${NC}"

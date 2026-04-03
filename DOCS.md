@@ -74,7 +74,7 @@ sudo ./install.sh
 ### Шаг 4: Данные
 
 После установки:
-- **URL:** `https://domain:port`
+- **URL:** `https://domain:port/randomURI` (URI — случайный 16-символьный путь)
 - **Логин:** `adminXXXX`
 - **Пароль:** (случайный)
 - **Файл:** `/root/x-ui-credentials.txt`
