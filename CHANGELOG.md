@@ -7,6 +7,18 @@
 
 ---
 
+## [1.2.0] - 2026-04-03
+
+### Added
+- WARP (Cloudflare) в режиме **proxy** — SOCKS5 на 127.0.0.1:40000
+
+### Fixed
+- WARP **не разрывает SSH и Nginx** — proxy mode не меняет маршрутизацию
+- Telegram бот автоматически использует WARP прокси
+- Удалён wgcf fallback и сложные iptables MARK правила
+
+---
+
 ## [1.1.0] - 2026-04-03
 
 ### Added
