@@ -90,6 +90,7 @@ sudo ./install.sh
 - 2FA Google Authenticator
 - AppArmor профили
 - DDoS защита
+- SOCKS5 прокси (Dante)
 
 ### 🌐 Сеть
 - IPv6 dual-stack
@@ -125,10 +126,17 @@ sudo ./install.sh
 - Sing-Box
 
 ### 📱 Клиенты
-- Генерация подписок
+- SSL подписки
 - QR коды
 - REST API (порт 8080)
 - Конвертер ссылок
+- Nginx reverse proxy
+
+### 🧦 SOCKS5 прокси
+- Dante сервер на 127.0.0.1:1080
+- Авторизация username/password
+- Telegram бот ходит через SOCKS5
+- Изоляция: только localhost и 10.0.0.0/8
 
 ---
 
@@ -150,6 +158,9 @@ x-ui update       # Обновить
 systemctl status x-ui
 systemctl restart x-ui
 journalctl -u x-ui -f
+systemctl status danted    # SOCKS5
+systemctl restart danted
+journalctl -u danted -f
 ```
 
 ### Скрипты

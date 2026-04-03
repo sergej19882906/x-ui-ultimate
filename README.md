@@ -61,8 +61,8 @@ chmod +x install.sh && sudo ./install.sh
 
 ## ✨ Функции
 
-### 🔒 Безопасность (6)
-UFW, Fail2ban, SSH hardening, 2FA, AppArmor, DDoS защита
+### 🔒 Безопасность (7)
+UFW, Fail2ban, SSH hardening, 2FA, AppArmor, DDoS защита, SOCKS5 прокси
 
 ### 🌐 Сеть (3)
 IPv6, TCP BBR, Cloudflare CDN
@@ -194,8 +194,8 @@ MIT License — см. [LICENSE](LICENSE)
 
 | Метрика | Значение |
 |---------|----------|
-| **Строк кода** | ~1600 |
-| **Функций** | 36 |
+| **Строк кода** | ~1750 |
+| **Функций** | 37 |
 | **Время установки** | 10-15 мин |
 | **RAM** | 512 MB мин. |
 
@@ -205,6 +205,7 @@ MIT License — см. [LICENSE](LICENSE)
 
 ### v1.1.0 (2026-04-03)
 - ✅ WARP (Cloudflare): установка warp-cli с fallback на wgcf
+- ✅ Split tunneling для WARP — SSH не разрывается
 - ✅ Интерактивное меню `x-ui` через wrapper-скрипт (9 пунктов)
 - ✅ Nginx reverse proxy для X-UI — панель на `https://domain/webBasePath/`
 - ✅ SSL-сертификаты для подписок через Nginx
@@ -212,6 +213,7 @@ MIT License — см. [LICENSE](LICENSE)
 - ✅ Инициализация БД и учётных данных перед запуском
 - ✅ Устранён конфликт портов Nginx (443) и X-UI
 - ✅ Диагностика запуска: systemd, journalctl, dmesg, AppArmor
+- ✅ SOCKS5 прокси (Dante) для Telegram бота
 - ✅ Летающие котики на странице-заглушке
 
 ### v1.0.3 (2026-04-01)
