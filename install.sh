@@ -951,12 +951,15 @@ if [[ "$USE_ZEROSL" != "y" ]]; then
             warn_log "certbot expand: если не прошло — проверьте DNS для поддоменов"
         certbot renew --non-interactive --cert-name "$DOMAIN" 2>/dev/null || certbot renew --non-interactive 2>/dev/null || true
         mkdir -p /usr/local/x-ui/cert
+        # Удаляем старые файлы/symlink чтобы cp не следовал по ссылке
+        rm -f /usr/local/x-ui/cert/server.crt /usr/local/x-ui/cert/server.key /usr/local/x-ui/cert/fullchain.crt
         cp /etc/letsencrypt/live/"$DOMAIN"/fullchain.pem /usr/local/x-ui/cert/server.crt
         cp /etc/letsencrypt/live/"$DOMAIN"/privkey.pem /usr/local/x-ui/cert/server.key
         chmod 600 /usr/local/x-ui/cert/server.key
         SSL_OK=true
     elif certbot certonly --standalone --non-interactive --agree-tos --email "${SSL_EMAIL}" "${LE_DOMAIN_ARGS[@]}"; then
         mkdir -p /usr/local/x-ui/cert
+        rm -f /usr/local/x-ui/cert/server.crt /usr/local/x-ui/cert/server.key /usr/local/x-ui/cert/fullchain.crt
         cp /etc/letsencrypt/live/"$DOMAIN"/fullchain.pem /usr/local/x-ui/cert/server.crt
         cp /etc/letsencrypt/live/"$DOMAIN"/privkey.pem /usr/local/x-ui/cert/server.key
         chmod 600 /usr/local/x-ui/cert/server.key
