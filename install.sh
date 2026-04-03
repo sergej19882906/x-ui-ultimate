@@ -373,10 +373,10 @@ if [[ "$ENABLE_WARP" == "y" ]]; then
     SERVER_IP=$(curl -s4 --max-time 5 ifconfig.me 2>/dev/null || curl -s4 --max-time 5 icanhazip.com 2>/dev/null || echo "")
     SSH_PORT_ACTUAL="${SSH_PORT:-$(ss -tlnp | grep sshd | grep -oP ':\K[0-9]+(?=\s)' | head -1)}"
     SSH_PORT_ACTUAL="${SSH_PORT_ACTUAL:-22}"
+    WARP_PROXY_PORT=40000
 
     if [[ -n "$SERVER_IP" ]]; then
         log "IP сервера: ${SERVER_IP}, SSH порт: ${SSH_PORT_ACTUAL}"
-        log "SSH и Nginx трафик будут исключены из WARP туннеля"
     fi
 
     # Установка warp-cli
@@ -389,99 +389,42 @@ if [[ "$ENABLE_WARP" == "y" ]]; then
     if apt-get install -y cloudflare-warp 2>/dev/null; then
         success_log "WARP клиент установлен"
 
-        # === ЗАЩИТА SSH + Nginx ДО подключения WARP ===
-        # iptables MARK — маркируем трафик чтобы WARP его не перехватывал
-        log "Защита SSH и Nginx через iptables MARK..."
-        # SSH
-        iptables -t mangle -A OUTPUT -p tcp --sport "${SSH_PORT_ACTUAL}" -j MARK --set-mark 0x1 2>/dev/null || true
-        iptables -t mangle -A OUTPUT -p tcp --dport "${SSH_PORT_ACTUAL}" -j MARK --set-mark 0x1 2>/dev/null || true
-        # Nginx HTTP/HTTPS
-        iptables -t mangle -A OUTPUT -p tcp --sport 80 -j MARK --set-mark 0x1 2>/dev/null || true
-        iptables -t mangle -A OUTPUT -p tcp --dport 80 -j MARK --set-mark 0x1 2>/dev/null || true
-        iptables -t mangle -A OUTPUT -p tcp --sport 443 -j MARK --set-mark 0x1 2>/dev/null || true
-        iptables -t mangle -A OUTPUT -p tcp --dport 443 -j MARK --set-mark 0x1 2>/dev/null || true
-        # Также исключаем весь IP сервера целиком (входящий + исходящий)
-        if [[ -n "$SERVER_IP" ]]; then
-            iptables -t mangle -A OUTPUT -d "${SERVER_IP}" -j MARK --set-mark 0x1 2>/dev/null || true
-            iptables -t mangle -A PREROUTING -d "${SERVER_IP}" -j MARK --set-mark 0x1 2>/dev/null || true
-        fi
-        # Сохраняем правила
-        if command -v iptables-persistent &>/dev/null || apt-get install -y iptables-persistent &>/dev/null; then
-            netfilter-persistent save 2>/dev/null || true
-        fi
-        success_log "iptables MARK: SSH + Nginx (80/443) исключены из WARP"
-
-        # Регистрация WARP
+        # === РЕЖИМ PROXY — НЕ меняет маршрутизацию, не рвёт SSH/Nginx ===
+        log "WARP режим: proxy (SOCKS5 на 127.0.0.1:${WARP_PROXY_PORT})"
         warp-cli --accept-tos registration new 2>/dev/null || true
-        warp-cli --accept-tos mode warp 2>/dev/null || true
-
-        # Split tunneling: исключаем IP сервера (дополнительно к iptables)
-        if [[ -n "$SERVER_IP" ]]; then
-            warp-cli --accept-tos add-excluded-route "${SERVER_IP}/32" 2>/dev/null || true
-            warp-cli --accept-tos add-excluded-route "10.0.0.0/8" 2>/dev/null || true
-            warp-cli --accept-tos add-excluded-route "172.16.0.0/12" 2>/dev/null || true
-            warp-cli --accept-tos add-excluded-route "192.168.0.0/16" 2>/dev/null || true
-        fi
-
+        warp-cli --accept-tos mode proxy 2>/dev/null || true
+        warp-cli --accept-tos set-proxy-port "${WARP_PROXY_PORT}" 2>/dev/null || true
         warp-cli --accept-tos connect 2>/dev/null || true
 
-        # Проверяем что SSH и Nginx всё ещё работают ПОСЛЕ подключения WARP
+        # Проверяем что SOCKS5 прокси слушает
         sleep 3
-        if ss -tlnp | grep -q ":${SSH_PORT_ACTUAL}\s"; then
-            success_log "SSH порт ${SSH_PORT_ACTUAL} активен"
+        if ss -tlnp | grep -q ":${WARP_PROXY_PORT}\s"; then
+            success_log "WARP SOCKS5 прокси на 127.0.0.1:${WARP_PROXY_PORT}"
         else
-            warn_log "SSH порт ${SSH_PORT_ACTUAL} не слушается!"
-        fi
-        if ss -tlnp | grep -qE ':80\s|:443\s'; then
-            success_log "Nginx (80/443) активен"
-        else
-            warn_log "Nginx (80/443) не слушается!"
+            warn_log "WARP: прокси порт ${WARP_PROXY_PORT} не слушается"
         fi
 
         # Проверяем статус подключения
         sleep 2
         if warp-cli --accept-tos status 2>/dev/null | grep -qi "connected\|update"; then
-            success_log "WARP статус: подключён"
+            success_log "WARP статус: подключён (proxy mode — SSH/Nginx не затронуты)"
         else
             warn_log "WARP: статус неизвест — проверьте: warp-cli status"
+        fi
+
+        # Настраиваем Telegram бота на использование WARP прокси
+        if [[ -n "$TELEGRAM_BOT_TOKEN" && -n "$TELEGRAM_CHAT_ID" ]]; then
+            SOCKS_HOST="127.0.0.1"
+            SOCKS_PORT="${WARP_PROXY_PORT}"
+            TELEGRAM_USE_PROXY="y"
+            log "Telegram бот будет использовать WARP SOCKS5 прокси"
         fi
 
         # Отключаем WARP от systemd-resolved (может конфликтовать)
         systemctl disable systemd-resolved 2>/dev/null || true
     else
-        warn_log "WARP не установлен — пробуем альтернативный метод..."
-        # Альтернатива: wgcf (WireGuard Profile for Cloudflare)
-        if curl -fsSL https://github.com/ViRb3/wgcf/releases/download/v2.2.21/wgcf_2.2.21_linux_amd64 -o /usr/local/bin/wgcf; then
-            chmod +x /usr/local/bin/wgcf
-            # Генерируем ключи
-            wgcf register --accept-tos 2>/dev/null || true
-            wgcf generate 2>/dev/null || true
-            if [[ -f wgcf-profile.conf ]]; then
-                # Добавляем PostUp/PostDown для исключения IP сервера, SSH и Nginx из WARP туннеля
-                if [[ -n "$SERVER_IP" ]]; then
-                    WG_RULES="PostUp = ip rule add to ${SERVER_IP}/32 table main
-PostDown = ip rule delete to ${SERVER_IP}/32 table main
-PostUp = iptables -t mangle -A OUTPUT -p tcp --sport ${SSH_PORT_ACTUAL} -j MARK --set-mark 0x1
-PostDown = iptables -t mangle -D OUTPUT -p tcp --sport ${SSH_PORT_ACTUAL} -j MARK --set-mark 0x1 2>/dev/null
-PostUp = iptables -t mangle -A OUTPUT -p tcp --sport 80 -j MARK --set-mark 0x1
-PostDown = iptables -t mangle -D OUTPUT -p tcp --sport 80 -j MARK --set-mark 0x1 2>/dev/null
-PostUp = iptables -t mangle -A OUTPUT -p tcp --sport 443 -j MARK --set-mark 0x1
-PostDown = iptables -t mangle -D OUTPUT -p tcp --sport 443 -j MARK --set-mark 0x1 2>/dev/null
-PostUp = iptables -t mangle -A OUTPUT -d ${SERVER_IP} -j MARK --set-mark 0x1
-PostDown = iptables -t mangle -D OUTPUT -d ${SERVER_IP} -j MARK --set-mark 0x1 2>/dev/null"
-                    sed -i "s|AllowedIPs = 0.0.0.0/0|AllowedIPs = 0.0.0.0/0\n${WG_RULES}|" wgcf-profile.conf
-                    log "wgcf: SSH + Nginx + IP сервера исключены из туннеля"
-                fi
-                cp wgcf-profile.conf /etc/wireguard/warp.conf
-                systemctl enable --now wg-quick@warp 2>/dev/null || true
-                success_log "WARP подключён через wgcf (WireGuard, SSH защищён)"
-            else
-                warn_log "WARP: не удалось сгенерировать профиль wgcf"
-            fi
-        else
-            error_log "WARP: не удалось установить ни warp-cli, ни wgcf"
-            ENABLE_WARP="n"
-        fi
+        error_log "WARP: не удалось установить cloudflare-warp"
+        ENABLE_WARP="n"
     fi
 fi
 
@@ -789,11 +732,11 @@ menu() {
             ;;
         8) $XUI_BIN ;;
         9)
-            echo "=== WARP Status ==="
+            echo "=== WARP Proxy Status ==="
             warp-cli --accept-tos status 2>/dev/null || echo "WARP не установлен"
             echo ""
-            echo "=== iptables MARK rules ==="
-            iptables -t mangle -L OUTPUT -n -v 2>/dev/null | grep MARK || echo "Нет правил MARK"
+            echo "=== WARP Proxy Port ==="
+            ss -tlnp | grep 40000 || echo "WARP прокси не слушает"
             echo ""
             echo "=== SSH Ports ==="
             ss -tlnp | grep sshd
@@ -816,11 +759,11 @@ case "${1:-}" in
     version)  exec $XUI_BIN version ;;
     setting)  exec $XUI_BIN setting "${@:2}" ;;
     warp)
-        echo "=== WARP Status ==="
+        echo "=== WARP Proxy Status ==="
         warp-cli --accept-tos status 2>/dev/null || echo "WARP не установлен"
         echo ""
-        echo "=== iptables MARK ==="
-        iptables -t mangle -L OUTPUT -n -v 2>/dev/null | grep MARK || echo "Нет правил MARK"
+        echo "=== WARP Proxy Port ==="
+        ss -tlnp | grep 40000 || echo "WARP прокси не слушает"
         echo ""
         echo "=== Listening Ports ==="
         ss -tlnp
@@ -1756,7 +1699,7 @@ if [[ "$ENABLE_IPV6" == "y" ]]; then
     echo -e "  IPv6:      ${GREEN}Включён${NC}"
 fi
 if [[ "$ENABLE_WARP" == "y" ]]; then
-    echo -e "  WARP:      ${GREEN}Подключён${NC}"
+    echo -e "  WARP:      ${GREEN}Proxy 127.0.0.1:${WARP_PROXY_PORT}${NC}"
 fi
 if [[ "$TELEGRAM_USE_PROXY" == "y" ]]; then
     echo -e "  SOCKS5:    ${GREEN}127.0.0.1:${SOCKS_PORT}${NC}"

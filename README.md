@@ -204,9 +204,10 @@ MIT License — см. [LICENSE](LICENSE)
 ## 🎯 Changelog
 
 ### v1.1.0 (2026-04-03)
-- ✅ WARP (Cloudflare): установка warp-cli с fallback на wgcf
-- ✅ Split tunneling для WARP — SSH не разрывается
-- ✅ Интерактивное меню `x-ui` через wrapper-скрипт (9 пунктов)
+- ✅ WARP (Cloudflare) в режиме **proxy** — SOCKS5 на 127.0.0.1:40000
+- ✅ **Не разрывает SSH и Nginx** — proxy mode не меняет маршрутизацию
+- ✅ Telegram бот автоматически использует WARP прокси
+- ✅ Интерактивное меню `x-ui` через wrapper-скрипт (10 пунктов)
 - ✅ Nginx reverse proxy для X-UI — панель на `https://domain/webBasePath/`
 - ✅ SSL-сертификаты для подписок через Nginx
 - ✅ Случайный URI панели (16 символов) и подписки (24 символа)
