@@ -133,6 +133,7 @@ read -r -p "Reality протокол? (y/n): " ENABLE_REALITY
 read -r -p "Hysteria 2? (y/n): " ENABLE_HYSTERIA
 read -r -p "Tuic? (y/n): " ENABLE_TUIC
 read -r -p "WireGuard? (y/n): " ENABLE_WIREGUARD
+read -r -p "WARP (Cloudflare)? (y/n): " ENABLE_WARP
 
 if [[ "$ENABLE_OBFUSCATION" == "y" ]]; then
     log "Транспорт маскировки: ${TRANSPORT_TYPE}"
@@ -354,6 +355,59 @@ WGC
 fi
 
 # =============================================================================
+# WARP (Cloudflare)
+# =============================================================================
+if [[ "$ENABLE_WARP" == "y" ]]; then
+    log "WARP (Cloudflare)..."
+
+    # Установка warp-cli
+    if [[ "$OS_ID" == "ubuntu" || "$OS_ID" == "debian" ]]; then
+        curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg 2>/dev/null
+        echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/cloudflare-client.list 2>/dev/null || true
+        apt-get update -qq 2>/dev/null || _apt_cleanup_bad_repos && apt-get update -qq 2>/dev/null || true
+    fi
+
+    if apt-get install -y cloudflare-warp 2>/dev/null; then
+        success_log "WARP клиент установлен"
+
+        # Регистрация WARP
+        warp-cli --accept-tos registration new 2>/dev/null || true
+        warp-cli --accept-tos mode warp 2>/dev/null || true
+        warp-cli --accept-tos connect 2>/dev/null || true
+
+        # Проверяем статус подключения
+        sleep 5
+        if warp-cli --accept-tos status 2>/dev/null | grep -qi "connected\|update"; then
+            success_log "WARP подключён"
+        else
+            warn_log "WARP: статус неизвест — проверьте вручную: warp-cli status"
+        fi
+
+        # Отключаем WARP от systemd-resolved (может конфликтовать)
+        systemctl disable systemd-resolved 2>/dev/null || true
+    else
+        warn_log "WARP не установлен — пробуем альтернативный метод..."
+        # Альтернатива: wgcf (WireGuard Profile for Cloudflare)
+        if curl -fsSL https://github.com/ViRb3/wgcf/releases/download/v2.2.21/wgcf_2.2.21_linux_amd64 -o /usr/local/bin/wgcf; then
+            chmod +x /usr/local/bin/wgcf
+            # Генерируем ключи
+            wgcf register --accept-tos 2>/dev/null || true
+            wgcf generate 2>/dev/null || true
+            if [[ -f wgcf-profile.conf ]]; then
+                cp wgcf-profile.conf /etc/wireguard/warp.conf
+                systemctl enable --now wg-quick@warp 2>/dev/null || true
+                success_log "WARP подключён через wgcf (WireGuard)"
+            else
+                warn_log "WARP: не удалось сгенерировать профиль wgcf"
+            fi
+        else
+            error_log "WARP: не удалось установить ни warp-cli, ни wgcf"
+            ENABLE_WARP="n"
+        fi
+    fi
+fi
+
+# =============================================================================
 # UFW
 # =============================================================================
 log "UFW..."
@@ -387,6 +441,9 @@ if [[ "$ENABLE_OBFUSCATION" == "y" ]]; then
 fi
 if [[ "$ENABLE_WIREGUARD" == "y" ]]; then
     ufw allow 51820/udp
+fi
+if [[ "$ENABLE_WARP" == "y" ]]; then
+    ufw allow 51820/udp comment 'WARP' 2>/dev/null || ufw allow 51820/udp
 fi
 if [[ "$ENABLE_HYSTERIA" == "y" ]]; then
     ufw allow 443/udp
@@ -1435,6 +1492,9 @@ echo -e "  SSH:       ${YELLOW}${SSH_PORT}${NC}"
 if [[ "$ENABLE_IPV6" == "y" ]]; then
     echo -e "  IPv6:      ${GREEN}Включён${NC}"
 fi
+if [[ "$ENABLE_WARP" == "y" ]]; then
+    echo -e "  WARP:      ${GREEN}Подключён${NC}"
+fi
 echo -e "  UFW:       ${GREEN}Включён${NC}"
 echo -e "  BBR:       ${GREEN}Включён${NC}"
 if [[ "$DOCKER_OK" == "true" ]]; then
@@ -1458,6 +1518,11 @@ echo ""
 echo -e "${CYAN}⚙️ Команды:${NC}"
 echo -e "  x-ui              - меню"
 echo -e "  x-ui status       - статус"
+if [[ "$ENABLE_WARP" == "y" ]]; then
+    echo -e "  warp-cli status   - статус WARP"
+    echo -e "  warp-cli connect  - подключить WARP"
+    echo -e "  warp-cli disconnect - отключить WARP"
+fi
 if [[ "$CREATE_SUBSCRIPTION" == "y" ]]; then
     echo -e "  generate-subscription.sh - подписки"
     echo -e "  Подписка: https://${DOMAIN}${SUB_PATH}/"
