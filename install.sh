@@ -599,6 +599,12 @@ if [[ -f /usr/local/x-ui/x-ui ]]; then
     chmod +x /usr/local/x-ui/x-ui
 fi
 
+# Symlink для команды x-ui
+if [[ ! -f /usr/local/bin/x-ui ]]; then
+    ln -sf /usr/local/x-ui/x-ui /usr/local/bin/x-ui
+    log "Symlink: /usr/local/bin/x-ui -> /usr/local/x-ui/x-ui"
+fi
+
 cat > /etc/systemd/system/x-ui.service << 'XUISVC'
 [Unit]
 Description=X-UI Panel
@@ -618,6 +624,46 @@ XUISVC
 
 systemctl daemon-reload
 systemctl enable x-ui
+
+# =============================================================================
+# Инициализация учётных данных X-UI
+# =============================================================================
+log "Настройка учётных данных X-UI..."
+if [[ -f /usr/local/x-ui/x-ui ]]; then
+    # x-ui setting — установка логина, пароля и порта без интерактива
+    # Используем expect-подоб подход через x-ui команды
+    cd /usr/local/x-ui
+    # Инициализация БД (первый запуск создаёт x-ui.db)
+    if [[ ! -f /usr/local/x-ui/x-ui.db ]]; then
+        # Запускаем x-ui на 5 секунд чтобы он создал БД, затем останавливаем
+        timeout 5 ./x-ui >/dev/null 2>&1 || true
+        sleep 2
+        systemctl stop x-ui 2>/dev/null || pkill -f '/usr/local/x-ui/x-ui' 2>/dev/null || true
+        sleep 2
+    fi
+
+    # Устанавливаем учётные данные через x-ui commands
+    # x-ui username и x-ui password — стандартные команды для 3x-ui
+    /usr/local/x-ui/x-ui setting -username "${XUI_USERNAME}" -password "${XUI_PASSWORD}" -port "${RANDOM_PORT}" 2>/dev/null || \
+        warn_log "x-ui setting не поддерживается — учётные данные будут заданы вручную"
+
+    # Для vaxilu/x-ui используем альтернативный метод — прямой запрос через stdin
+    if ! /usr/local/x-ui/x-ui setting -username "${XUI_USERNAME}" &>/dev/null; then
+        warn_log "Пробуем альтернативный метод установки учётных данных..."
+        # Генерируем хеш пароля и записываем прямо в БД через SQLite
+        if command -v sqlite3 &>/dev/null || apt-get install -y sqlite3 &>/dev/null; then
+            PASS_HASH=$(/usr/local/x-ui/x-ui -hash "${XUI_PASSWORD}" 2>/dev/null || echo "")
+            if [[ -n "$PASS_HASH" && -f /usr/local/x-ui/x-ui.db ]]; then
+                sqlite3 /usr/local/x-ui/x-ui.db "UPDATE user SET username='${XUI_USERNAME}', password='${PASS_HASH}' WHERE id=1;" 2>/dev/null || true
+                success_log "Учётные данные установлены через БД"
+            else
+                warn_log "Не удалось создать хеш пароля — используйте x-ui меню"
+            fi
+        fi
+    else
+        success_log "Учётные данные установлены"
+    fi
+fi
 
 # =============================================================================
 # AppArmor
@@ -1231,14 +1277,58 @@ fi
 # Запуск
 # =============================================================================
 log "Запуск X-UI..."
-systemctl start x-ui
-sleep 3
-if systemctl is-active --quiet x-ui; then
-    success_log "X-UI запущен"
+
+# Проверяем что бинарник существует и исполняемый
+if [[ ! -x /usr/local/x-ui/x-ui ]]; then
+    error_log "Бинарник x-ui не найден или не исполняемый"
+    ls -la /usr/local/x-ui/ 2>/dev/null || true
 else
-    error_log "X-UI ошибка"
-    warn_log "journalctl -u x-ui -f"
+    success_log "Бинарник x-ui: $(file /usr/local/x-ui/x-ui)"
 fi
+
+# Проверяем что БД существует
+if [[ ! -f /usr/local/x-ui/x-ui.db ]]; then
+    warn_log "БД x-ui.db отсутствует — x-ui создаст её при первом запуске"
+fi
+
+# Сбрасываем failed-состояние сервиса
+systemctl reset-failed x-ui 2>/dev/null || true
+
+# Перезапускаем сервис (не просто start, чтобы подхватить настройки)
+systemctl restart x-ui
+
+# Ждём инициализации (x-ui может грузиться до 10 секунд)
+log "Ожидание инициализации x-ui..."
+for i in $(seq 1 15); do
+    if systemctl is-active --quiet x-ui; then
+        success_log "X-UI запущен (через ${i} сек)"
+        break
+    fi
+    if [[ $i -eq 15 ]]; then
+        error_log "X-UI не запустился за 15 секунд"
+        echo ""
+        error_log "=== Диагностика ==="
+        echo "Status:"
+        systemctl status x-ui --no-pager 2>&1 | head -20
+        echo ""
+        echo "Last journal entries:"
+        journalctl -u x-ui --no-pager -n 15 2>&1 | tail -15
+        echo ""
+        # Проверяем не упал ли по сегфолту
+        if dmesg 2>/dev/null | grep -i "x-ui\|segfault" | tail -3; then
+            error_log "Возможен segfault — проверьте dmesg"
+        fi
+        # Проверяем AppArmor
+        if dmesg 2>/dev/null | grep -i "apparmor.*x-ui" | tail -3; then
+            warn_log "AppArmor может блокировать x-ui"
+        fi
+        echo ""
+        warn_log "Попробуйте: x-ui (меню) для ручной настройки"
+        warn_log "Или: /usr/local/x-ui/x-ui (прямой запуск для отладки)"
+        break
+    fi
+    sleep 1
+done
 
 # =============================================================================
 # Финал
