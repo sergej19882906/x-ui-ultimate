@@ -931,6 +931,18 @@ server {
         return 301 https://\$server_name/${XUI_WEB_PATH}/;
     }
 
+    # Reverse proxy к подпискам X-UI
+    location /${SUB_PATH}/ {
+        # Раздаём статический base64 файл подписки
+        alias /usr/local/x-ui/subscription-b64.txt;
+        default_type 'text/plain; charset=utf-8';
+        add_header Access-Control-Allow-Origin '*' always;
+        add_header Cache-Control 'no-cache, no-store, must-revalidate' always;
+    }
+    location =/${SUB_PATH} {
+        return 301 https://\$server_name/${SUB_PATH}/;
+    }
+
     location / { try_files \$uri \$uri/ =404; }
     server_tokens off;
 }
@@ -1162,6 +1174,7 @@ echo "# X-UI Subscriptions - \$(date)" > "\$SUB"
 x-ui link 2>/dev/null | grep -iE 'vless|trojan|vmess' >> "\$SUB" || echo "No links" >> "\$SUB"
 base64 -w0 "\$SUB" > /usr/local/x-ui/subscription-b64.txt
 echo "URL: https://\${DOMAIN}\${SUB_URI}/"
+echo "Подписка доступна через HTTPS (порт 443) с SSL-сертификатом"
 SUBSH
     chmod +x /usr/local/x-ui/generate-subscription.sh
     # Сохраняем URI подписки для справки
