@@ -801,19 +801,60 @@ systemctl enable x-ui
 # =============================================================================
 log "Настройка учётных данных X-UI..."
 if [[ -f /usr/local/x-ui/x-ui ]]; then
-    # x-ui setting — установка логина, пароля и порта без интерактива
-    # Используем expect-подоб подход через x-ui команды
     cd /usr/local/x-ui
-    # Инициализация БД (первый запуск создаёт x-ui.db)
+
+    # === Шаг 1: Инициализация БД ===
     if [[ ! -f /usr/local/x-ui/x-ui.db ]]; then
-        # Запускаем x-ui на 5 секунд чтобы он создал БД, затем останавливаем
-        timeout 5 ./x-ui >/dev/null 2>&1 || true
-        sleep 2
+        log "Инициализация БД x-ui.db..."
+        # Запускаем x-ui чтобы он создал БД
+        timeout 8 ./x-ui >/dev/null 2>&1 || true
+        sleep 3
+        # Останавливаем
         systemctl stop x-ui 2>/dev/null || pkill -f '/usr/local/x-ui/x-ui' 2>/dev/null || true
         sleep 2
+        if [[ -f /usr/local/x-ui/x-ui.db ]]; then
+            success_log "БД x-ui.db создана"
+        else
+            warn_log "БД x-ui.db не создана — x-ui может не запуститься"
+        fi
     fi
 
-    # Определяем пути к SSL сертификатам для x-ui panel
+    # === Шаг 2: Настройка через x-ui setting (по одному параметру) ===
+    XUI_SETTING_OK=false
+
+    # Порт
+    if /usr/local/x-ui/x-ui setting -port "${RANDOM_PORT}" &>/dev/null; then
+        log "Порт x-ui: ${RANDOM_PORT}"
+        XUI_SETTING_OK=true
+    else
+        warn_log "x-ui setting -port не сработал"
+    fi
+
+    # Логин
+    if /usr/local/x-ui/x-ui setting -username "${XUI_USERNAME}" &>/dev/null; then
+        log "Логин x-ui: ${XUI_USERNAME}"
+        XUI_SETTING_OK=true
+    else
+        warn_log "x-ui setting -username не сработал"
+    fi
+
+    # Пароль
+    if /usr/local/x-ui/x-ui setting -password "${XUI_PASSWORD}" &>/dev/null; then
+        log "Пароль x-ui установлен"
+        XUI_SETTING_OK=true
+    else
+        warn_log "x-ui setting -password не сработал"
+    fi
+
+    # WebBasePath
+    if /usr/local/x-ui/x-ui setting -webBasePath "/${XUI_WEB_PATH}" &>/dev/null; then
+        log "URI панели: /${XUI_WEB_PATH}"
+        XUI_SETTING_OK=true
+    else
+        warn_log "x-ui setting -webBasePath не поддерживается"
+    fi
+
+    # SSL cert/key (только если файлы существуют)
     XUI_CERT=""
     XUI_KEY=""
     if [[ "$USE_ZEROSL" == "y" ]]; then
@@ -824,51 +865,37 @@ if [[ -f /usr/local/x-ui/x-ui ]]; then
         XUI_KEY="/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
     fi
 
-    # Устанавливаем учётные данные через x-ui commands
-    # x-ui username и x-ui password — стандартные команды для 3x-ui
-    if [[ -n "$XUI_CERT" && -n "$XUI_KEY" ]]; then
-        log "Настройка SSL и URI для x-ui panel..."
-        /usr/local/x-ui/x-ui setting \
-            -username "${XUI_USERNAME}" \
-            -password "${XUI_PASSWORD}" \
-            -port "${RANDOM_PORT}" \
-            -cert "$XUI_CERT" \
-            -key "$XUI_KEY" \
-            -webBasePath "/${XUI_WEB_PATH}" 2>/dev/null && \
-            success_log "Учётные данные, SSL и URI установлены" || \
-            warn_log "x-ui setting с SSL/URI не поддерживается — пробуем без SSL"
+    if [[ -n "$XUI_CERT" && -n "$XUI_KEY" && -f "$XUI_CERT" && -f "$XUI_KEY" ]]; then
+        if /usr/local/x-ui/x-ui setting -cert "$XUI_CERT" &>/dev/null; then
+            log "SSL cert для x-ui: $XUI_CERT"
+        else
+            warn_log "x-ui setting -cert не поддерживается"
+        fi
+        if /usr/local/x-ui/x-ui setting -key "$XUI_KEY" &>/dev/null; then
+            log "SSL key для x-ui: $XUI_KEY"
+        else
+            warn_log "x-ui setting -key не поддерживается"
+        fi
     fi
 
-    # Fallback: без SSL параметров
-    if ! /usr/local/x-ui/x-ui setting -username "${XUI_USERNAME}" &>/dev/null; then
-        warn_log "Пробуем альтернативный метод установки учётных данных..."
-        # Генерируем хеш пароля и записываем прямо в БД через SQLite
+    # === Шаг 3: Fallback — прямое редактирование БД через sqlite3 ===
+    if [[ "$XUI_SETTING_OK" != "true" && -f /usr/local/x-ui/x-ui.db ]]; then
+        warn_log "x-ui setting не сработал — правим БД напрямую..."
         if command -v sqlite3 &>/dev/null || apt-get install -y sqlite3 &>/dev/null; then
-            PASS_HASH=$(/usr/local/x-ui/x-ui -hash "${XUI_PASSWORD}" 2>/dev/null || echo "")
-            if [[ -n "$PASS_HASH" && -f /usr/local/x-ui/x-ui.db ]]; then
-                sqlite3 /usr/local/x-ui/x-ui.db "UPDATE user SET username='${XUI_USERNAME}', password='${PASS_HASH}' WHERE id=1;" 2>/dev/null || true
-                success_log "Учётные данные установлены через БД"
-            else
-                warn_log "Не удалось создать хеш пароля — используйте x-ui меню"
-            fi
+            # Обновляем пользователя
+            sqlite3 /usr/local/x-ui/x-ui.db "UPDATE user SET username='${XUI_USERNAME}' WHERE id=1;" 2>/dev/null || true
+            sqlite3 /usr/local/x-ui/x-ui.db "UPDATE user SET webBasePath='/${XUI_WEB_PATH}' WHERE id=1;" 2>/dev/null || true
+            success_log "БД обновлена через sqlite3"
+        else
+            warn_log "sqlite3 недоступен — используйте x-ui меню"
         fi
-    else
-        success_log "Учётные данные установлены"
     fi
 
-    # Если SSL не настроен через setting, копируем сертификаты в папку x-ui
-    # и создаём конфиг для panel
+    # === Шаг 4: Symlink SSL для x-ui ===
     if [[ -n "$XUI_CERT" && -n "$XUI_KEY" ]]; then
-        # Убеждаемся что x-ui видит сертификаты
-        if [[ ! -f "$XUI_CERT" ]]; then
-            warn_log "SSL сертификат не найден: $XUI_CERT"
-        fi
-        if [[ ! -f "$XUI_KEY" ]]; then
-            warn_log "SSL ключ не найден: $XUI_KEY"
-        fi
-        # Создаём symlink из letsencrypt в папку x-ui для надёжности
         if [[ "$USE_ZEROSL" != "y" && -d "/etc/letsencrypt/live/${DOMAIN}" ]]; then
             mkdir -p /usr/local/x-ui/cert
+            rm -f /usr/local/x-ui/cert/server.crt /usr/local/x-ui/cert/server.key
             ln -sf "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" /usr/local/x-ui/cert/server.crt
             ln -sf "/etc/letsencrypt/live/${DOMAIN}/privkey.pem" /usr/local/x-ui/cert/server.key
             log "Symlink SSL: /usr/local/x-ui/cert -> Let's Encrypt"
