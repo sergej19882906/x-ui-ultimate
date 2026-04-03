@@ -376,7 +376,7 @@ if [[ "$ENABLE_WARP" == "y" ]]; then
 
     if [[ -n "$SERVER_IP" ]]; then
         log "IP сервера: ${SERVER_IP}, SSH порт: ${SSH_PORT_ACTUAL}"
-        log "SSH трафик будет исключён из WARP туннеля"
+        log "SSH и Nginx трафик будут исключены из WARP туннеля"
     fi
 
     # Установка warp-cli
@@ -389,17 +389,27 @@ if [[ "$ENABLE_WARP" == "y" ]]; then
     if apt-get install -y cloudflare-warp 2>/dev/null; then
         success_log "WARP клиент установлен"
 
-        # === ЗАЩИТА SSH ДО подключения WARP ===
-        # iptables MARK для SSH трафика — WARP не перехватывает marked пакеты
-        if [[ -n "$SSH_PORT_ACTUAL" ]]; then
-            log "Защита SSH через iptables MARK..."
-            iptables -t mangle -A OUTPUT -p tcp --sport "${SSH_PORT_ACTUAL}" -j MARK --set-mark 0x1 2>/dev/null || true
-            iptables -t mangle -A OUTPUT -p tcp --dport "${SSH_PORT_ACTUAL}" -j MARK --set-mark 0x1 2>/dev/null || true
-            # Сохраняем правила для сохранения после перезагрузки
-            if command -v iptables-persistent &>/dev/null || apt-get install -y iptables-persistent &>/dev/null; then
-                netfilter-persistent save 2>/dev/null || true
-            fi
+        # === ЗАЩИТА SSH + Nginx ДО подключения WARP ===
+        # iptables MARK — маркируем трафик чтобы WARP его не перехватывал
+        log "Защита SSH и Nginx через iptables MARK..."
+        # SSH
+        iptables -t mangle -A OUTPUT -p tcp --sport "${SSH_PORT_ACTUAL}" -j MARK --set-mark 0x1 2>/dev/null || true
+        iptables -t mangle -A OUTPUT -p tcp --dport "${SSH_PORT_ACTUAL}" -j MARK --set-mark 0x1 2>/dev/null || true
+        # Nginx HTTP/HTTPS
+        iptables -t mangle -A OUTPUT -p tcp --sport 80 -j MARK --set-mark 0x1 2>/dev/null || true
+        iptables -t mangle -A OUTPUT -p tcp --dport 80 -j MARK --set-mark 0x1 2>/dev/null || true
+        iptables -t mangle -A OUTPUT -p tcp --sport 443 -j MARK --set-mark 0x1 2>/dev/null || true
+        iptables -t mangle -A OUTPUT -p tcp --dport 443 -j MARK --set-mark 0x1 2>/dev/null || true
+        # Также исключаем весь IP сервера целиком (входящий + исходящий)
+        if [[ -n "$SERVER_IP" ]]; then
+            iptables -t mangle -A OUTPUT -d "${SERVER_IP}" -j MARK --set-mark 0x1 2>/dev/null || true
+            iptables -t mangle -A PREROUTING -d "${SERVER_IP}" -j MARK --set-mark 0x1 2>/dev/null || true
         fi
+        # Сохраняем правила
+        if command -v iptables-persistent &>/dev/null || apt-get install -y iptables-persistent &>/dev/null; then
+            netfilter-persistent save 2>/dev/null || true
+        fi
+        success_log "iptables MARK: SSH + Nginx (80/443) исключены из WARP"
 
         # Регистрация WARP
         warp-cli --accept-tos registration new 2>/dev/null || true
@@ -415,12 +425,17 @@ if [[ "$ENABLE_WARP" == "y" ]]; then
 
         warp-cli --accept-tos connect 2>/dev/null || true
 
-        # Проверяем что SSH всё ещё работает ПОСЛЕ подключения WARP
+        # Проверяем что SSH и Nginx всё ещё работают ПОСЛЕ подключения WARP
         sleep 3
         if ss -tlnp | grep -q ":${SSH_PORT_ACTUAL}\s"; then
-            success_log "WARP подключён, SSH порт ${SSH_PORT_ACTUAL} активен"
+            success_log "SSH порт ${SSH_PORT_ACTUAL} активен"
         else
-            warn_log "WARP: SSH порт ${SSH_PORT_ACTUAL} не слушается!"
+            warn_log "SSH порт ${SSH_PORT_ACTUAL} не слушается!"
+        fi
+        if ss -tlnp | grep -qE ':80\s|:443\s'; then
+            success_log "Nginx (80/443) активен"
+        else
+            warn_log "Nginx (80/443) не слушается!"
         fi
 
         # Проверяем статус подключения
@@ -442,14 +457,20 @@ if [[ "$ENABLE_WARP" == "y" ]]; then
             wgcf register --accept-tos 2>/dev/null || true
             wgcf generate 2>/dev/null || true
             if [[ -f wgcf-profile.conf ]]; then
-                # Добавляем PostUp/PostDown для исключения IP сервера и SSH порта из WARP туннеля
+                # Добавляем PostUp/PostDown для исключения IP сервера, SSH и Nginx из WARP туннеля
                 if [[ -n "$SERVER_IP" ]]; then
                     WG_RULES="PostUp = ip rule add to ${SERVER_IP}/32 table main
 PostDown = ip rule delete to ${SERVER_IP}/32 table main
 PostUp = iptables -t mangle -A OUTPUT -p tcp --sport ${SSH_PORT_ACTUAL} -j MARK --set-mark 0x1
-PostDown = iptables -t mangle -D OUTPUT -p tcp --sport ${SSH_PORT_ACTUAL} -j MARK --set-mark 0x1 2>/dev/null"
+PostDown = iptables -t mangle -D OUTPUT -p tcp --sport ${SSH_PORT_ACTUAL} -j MARK --set-mark 0x1 2>/dev/null
+PostUp = iptables -t mangle -A OUTPUT -p tcp --sport 80 -j MARK --set-mark 0x1
+PostDown = iptables -t mangle -D OUTPUT -p tcp --sport 80 -j MARK --set-mark 0x1 2>/dev/null
+PostUp = iptables -t mangle -A OUTPUT -p tcp --sport 443 -j MARK --set-mark 0x1
+PostDown = iptables -t mangle -D OUTPUT -p tcp --sport 443 -j MARK --set-mark 0x1 2>/dev/null
+PostUp = iptables -t mangle -A OUTPUT -d ${SERVER_IP} -j MARK --set-mark 0x1
+PostDown = iptables -t mangle -D OUTPUT -d ${SERVER_IP} -j MARK --set-mark 0x1 2>/dev/null"
                     sed -i "s|AllowedIPs = 0.0.0.0/0|AllowedIPs = 0.0.0.0/0\n${WG_RULES}|" wgcf-profile.conf
-                    log "wgcf: SSH и IP сервера исключены из туннеля"
+                    log "wgcf: SSH + Nginx + IP сервера исключены из туннеля"
                 fi
                 cp wgcf-profile.conf /etc/wireguard/warp.conf
                 systemctl enable --now wg-quick@warp 2>/dev/null || true
@@ -733,9 +754,10 @@ menu() {
     echo "║  6. Обновить X-UI                                         ║"
     echo "║  7. Сбросить логин/пароль/URI панели                      ║"
     echo "║  8. Настройки панели                                      ║"
-    echo "║  9. Выйти                                                 ║"
+    echo "║  9. Статус WARP                                           ║"
+    echo "║  10. Выйти                                                ║"
     echo "╚═══════════════════════════════════════════════════════════╝"
-    read -r -p "Выбор (1-9): " choice
+    read -r -p "Выбор (1-10): " choice
     case $choice in
         1) systemctl start x-ui; echo "X-UI запущен" ;;
         2) systemctl stop x-ui; echo "X-UI остановлен" ;;
@@ -766,7 +788,20 @@ menu() {
             fi
             ;;
         8) $XUI_BIN ;;
-        9) exit 0 ;;
+        9)
+            echo "=== WARP Status ==="
+            warp-cli --accept-tos status 2>/dev/null || echo "WARP не установлен"
+            echo ""
+            echo "=== iptables MARK rules ==="
+            iptables -t mangle -L OUTPUT -n -v 2>/dev/null | grep MARK || echo "Нет правил MARK"
+            echo ""
+            echo "=== SSH Ports ==="
+            ss -tlnp | grep sshd
+            echo ""
+            echo "=== Nginx Ports ==="
+            ss -tlnp | grep -E ':80|:443'
+            ;;
+        10) exit 0 ;;
         *) echo "Неверный выбор" ;;
     esac
 }
@@ -780,6 +815,16 @@ case "${1:-}" in
     update)   exec $XUI_BIN update ;;
     version)  exec $XUI_BIN version ;;
     setting)  exec $XUI_BIN setting "${@:2}" ;;
+    warp)
+        echo "=== WARP Status ==="
+        warp-cli --accept-tos status 2>/dev/null || echo "WARP не установлен"
+        echo ""
+        echo "=== iptables MARK ==="
+        iptables -t mangle -L OUTPUT -n -v 2>/dev/null | grep MARK || echo "Нет правил MARK"
+        echo ""
+        echo "=== Listening Ports ==="
+        ss -tlnp
+        ;;
     "")       menu ;;
     *)        exec $XUI_BIN "$@" ;;
 esac
