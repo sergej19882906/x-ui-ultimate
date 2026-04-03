@@ -171,6 +171,15 @@ read -r -p "Telegram? (y/n): " SETUP_TELEGRAM
 if [[ "$SETUP_TELEGRAM" == "y" ]]; then
     read -r -p "Токен бота: " TELEGRAM_BOT_TOKEN
     read -r -p "Chat ID: " TELEGRAM_CHAT_ID
+    read -r -p "SOCKS5 прокси для Telegram? (y/n): " TELEGRAM_USE_PROXY
+    if [[ "$TELEGRAM_USE_PROXY" == "y" ]]; then
+        read -r -p "SOCKS5 хост (Enter=127.0.0.1): " SOCKS_HOST
+        SOCKS_HOST="${SOCKS_HOST:-127.0.0.1}"
+        read -r -p "SOCKS5 порт (Enter=1080): " SOCKS_PORT
+        SOCKS_PORT="${SOCKS_PORT:-1080}"
+        read -r -p "SOCKS5 логин (Enter=без auth): " SOCKS_USER
+        read -r -p "SOCKS5 пароль (Enter=без auth): " SOCKS_PASS
+    fi
 fi
 read -r -p "Discord webhook? (y/n): " SETUP_DISCORD
 if [[ "$SETUP_DISCORD" == "y" ]]; then
@@ -1222,6 +1231,14 @@ if [[ -n "$KUMA_HTTPS_HOST" ]]; then
 "
 fi
 
+SOCKS_CRED_LINE=""
+if [[ "$TELEGRAM_USE_PROXY" == "y" ]]; then
+    SOCKS_CRED_LINE="SOCKS5: 127.0.0.1:${SOCKS_PORT}
+SOCKS_USER: ${SOCKS_USERNAME}
+SOCKS_PASS: ${SOCKS_PASSWORD_REAL}
+"
+fi
+
 cat > /root/x-ui-credentials.txt << CREDS
 ╔═══════════════════════════════════════════════════════════╗
 ║              X-UI Panel Credentials                       ║
@@ -1234,7 +1251,7 @@ URI панели: /${XUI_WEB_PATH}
 URI подписки: /${SUB_PATH}
 Логин: ${XUI_USERNAME}
 Пароль: ${XUI_PASSWORD}
-SSH Порт: ${SSH_PORT}
+${SOCKS_CRED_LINE}SSH Порт: ${SSH_PORT}
 API Key: ${API_KEY}
 ${PORTAINER_CRED_LINE}${KUMA_CRED_LINE}╠═══════════════════════════════════════════════════════════╣
 Команды: x-ui start|stop|restart|status|log
@@ -1281,14 +1298,100 @@ BACKUP
 fi
 
 # =============================================================================
+# SOCKS5 прокси (Dante)
+# =============================================================================
+if [[ "$TELEGRAM_USE_PROXY" == "y" ]]; then
+    log "SOCKS5 прокси (Dante)..."
+    apt install -y dante-server
+
+    # Генерируем учётные данные для SOCKS5
+    SOCKS_USERNAME="socksuser$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 6)"
+    SOCKS_PASSWORD_REAL=$(head /dev/urandom | tr -dc 'A-Za-z0-9@#' | head -c 16)
+
+    # Создаём системного пользователя
+    if ! id -u "$SOCKS_USERNAME" &>/dev/null; then
+        useradd -r -s /usr/sbin/nologin -M "$SOCKS_USERNAME"
+    fi
+    echo "${SOCKS_USERNAME}:${SOCKS_PASSWORD_REAL}" | chpasswd
+
+    # Конфигурация Dante
+    cat > /etc/danted.conf << DANTECFG
+logoutput: stderr
+internal: 127.0.0.1 port = ${SOCKS_PORT}
+external: eth0
+
+method: username
+
+user.privileged: root
+user.unprivileged: nobody
+user.libwrap: nobody
+
+client pass {
+    from: 127.0.0.0/8 to: 0.0.0.0/0
+    log: connect disconnect error
+}
+
+client pass {
+    from: 10.0.0.0/8 to: 0.0.0.0/0
+    log: connect disconnect error
+}
+
+client block {
+    from: 0.0.0.0/0 to: 0.0.0.0/0
+    log: connect error
+}
+
+pass {
+    from: 127.0.0.0/8 to: 0.0.0.0/0
+    command: bind connect udpassociate
+    log: connect disconnect error
+    method: username
+}
+
+pass {
+    from: 10.0.0.0/8 to: 0.0.0.0/0
+    command: bind connect udpassociate
+    log: connect disconnect error
+    method: username
+}
+
+block {
+    from: 0.0.0.0/0 to: 0.0.0.0/0
+    log: connect error
+}
+DANTECFG
+
+    systemctl enable danted
+    systemctl restart danted
+
+    if systemctl is-active --quiet danted; then
+        success_log "SOCKS5 запущен на 127.0.0.1:${SOCKS_PORT}"
+        log "SOCKS5 логин: ${SOCKS_USERNAME}"
+        log "SOCKS5 пароль: ${SOCKS_PASSWORD_REAL}"
+    else
+        warn_log "SOCKS5 не запустился — проверьте: journalctl -u danted"
+    fi
+fi
+
+# =============================================================================
 # Telegram
 # =============================================================================
 if [[ -n "$TELEGRAM_BOT_TOKEN" && -n "$TELEGRAM_CHAT_ID" ]]; then
+    # Формируем CURL с SOCKS5 прокси если включён
+    CURL_PROXY=""
+    if [[ "$TELEGRAM_USE_PROXY" == "y" ]]; then
+        if [[ -n "$SOCKS_USER" && -n "$SOCKS_PASS" ]]; then
+            CURL_PROXY="--socks5-hostname ${SOCKS_HOST}:${SOCKS_PORT} --proxy-user ${SOCKS_USER}:${SOCKS_PASS}"
+        else
+            CURL_PROXY="--socks5-hostname ${SOCKS_HOST}:${SOCKS_PORT}"
+        fi
+    fi
+
     cat > /usr/local/x-ui/telegram-notify.sh << TGNOT
 #!/bin/bash
 BOT="${TELEGRAM_BOT_TOKEN}"
 CHAT="${TELEGRAM_CHAT_ID}"
-curl -s -X POST "https://api.telegram.org/bot\${BOT}/sendMessage" -d "chat_id=\${CHAT}&text=\$1&parse_mode=HTML" > /dev/null
+curl -s ${CURL_PROXY} -X POST "https://api.telegram.org/bot\${BOT}/sendMessage" -d "chat_id=\${CHAT}&text=\$1&parse_mode=HTML" > /dev/null
 TGNOT
     chmod +x /usr/local/x-ui/telegram-notify.sh
     /usr/local/x-ui/telegram-notify.sh "🟢 X-UI: ${DOMAIN}"
@@ -1584,6 +1687,9 @@ if [[ "$ENABLE_IPV6" == "y" ]]; then
 fi
 if [[ "$ENABLE_WARP" == "y" ]]; then
     echo -e "  WARP:      ${GREEN}Подключён${NC}"
+fi
+if [[ "$TELEGRAM_USE_PROXY" == "y" ]]; then
+    echo -e "  SOCKS5:    ${GREEN}127.0.0.1:${SOCKS_PORT}${NC}"
 fi
 echo -e "  UFW:       ${GREEN}Включён${NC}"
 echo -e "  BBR:       ${GREEN}Включён${NC}"
