@@ -360,6 +360,12 @@ fi
 if [[ "$ENABLE_WARP" == "y" ]]; then
     log "WARP (Cloudflare)..."
 
+    # Определяем публичный IP сервера ДО подключения WARP
+    SERVER_IP=$(curl -s4 --max-time 5 ifconfig.me 2>/dev/null || curl -s4 --max-time 5 icanhazip.com 2>/dev/null || echo "")
+    if [[ -n "$SERVER_IP" ]]; then
+        log "IP сервера: ${SERVER_IP} (будет исключён из WARP для SSH)"
+    fi
+
     # Установка warp-cli
     if [[ "$OS_ID" == "ubuntu" || "$OS_ID" == "debian" ]]; then
         curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg 2>/dev/null
@@ -373,12 +379,24 @@ if [[ "$ENABLE_WARP" == "y" ]]; then
         # Регистрация WARP
         warp-cli --accept-tos registration new 2>/dev/null || true
         warp-cli --accept-tos mode warp 2>/dev/null || true
+
+        # Split tunneling: исключаем IP сервера чтобы SSH не разорвался
+        if [[ -n "$SERVER_IP" ]]; then
+            # Исключаем IP сервера (чтобы SSH не шёл через WARP)
+            warp-cli --accept-tos add-excluded-route "${SERVER_IP}/32" 2>/dev/null || true
+            # Исключаем локальные сети
+            warp-cli --accept-tos add-excluded-route "10.0.0.0/8" 2>/dev/null || true
+            warp-cli --accept-tos add-excluded-route "172.16.0.0/12" 2>/dev/null || true
+            warp-cli --accept-tos add-excluded-route "192.168.0.0/16" 2>/dev/null || true
+            log "Split tunneling: SSH не идёт через WARP"
+        fi
+
         warp-cli --accept-tos connect 2>/dev/null || true
 
         # Проверяем статус подключения
         sleep 5
         if warp-cli --accept-tos status 2>/dev/null | grep -qi "connected\|update"; then
-            success_log "WARP подключён"
+            success_log "WARP подключён (SSH в безопасности)"
         else
             warn_log "WARP: статус неизвест — проверьте вручную: warp-cli status"
         fi
@@ -394,9 +412,14 @@ if [[ "$ENABLE_WARP" == "y" ]]; then
             wgcf register --accept-tos 2>/dev/null || true
             wgcf generate 2>/dev/null || true
             if [[ -f wgcf-profile.conf ]]; then
+                # Добавляем PostUp/PostDown для исключения IP сервера из WARP туннеля
+                if [[ -n "$SERVER_IP" ]]; then
+                    sed -i "s|AllowedIPs = 0.0.0.0/0|AllowedIPs = 0.0.0.0/0\nPostUp = ip rule add to ${SERVER_IP}/32 table main\nPostDown = ip rule delete to ${SERVER_IP}/32 table main|" wgcf-profile.conf
+                    log "wgcf: IP сервера ${SERVER_IP} исключён из туннеля"
+                fi
                 cp wgcf-profile.conf /etc/wireguard/warp.conf
                 systemctl enable --now wg-quick@warp 2>/dev/null || true
-                success_log "WARP подключён через wgcf (WireGuard)"
+                success_log "WARP подключён через wgcf (WireGuard, SSH защищён)"
             else
                 warn_log "WARP: не удалось сгенерировать профиль wgcf"
             fi
