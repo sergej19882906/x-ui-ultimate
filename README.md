@@ -67,8 +67,11 @@ UFW, Fail2ban, SSH hardening, 2FA, AppArmor, DDoS защита
 ### 🌐 Сеть (3)
 IPv6, TCP BBR, Cloudflare CDN
 
-### 🛡️ Обход блокировок (7)
-WebSocket, gRPC, ShadowTLS, Reality, Hysteria 2, Tuic, WireGuard
+### 🛡️ Обход блокировок (8)
+WARP, WebSocket, gRPC, ShadowTLS, Reality, Hysteria 2, Tuic, WireGuard
+
+### 🔐 Безопасность панели (3)
+Случайный URI панели (16 символов), случайный URI подписки (24 символа), Nginx reverse proxy
 
 ### 📊 Мониторинг (4)
 Telegram, Discord, Uptime Kuma, Health check
@@ -82,10 +85,10 @@ Docker, Portainer
 ### 📦 Протоколы (3)
 Trojan-Go, Brook, Sing-Box
 
-### 📱 Клиенты (4)
-Подписки, QR коды, REST API, Конвертер
+### 📱 Клиенты (5)
+SSL подписки, QR коды, REST API, Конвертер, Nginx reverse proxy
 
-**Всего:** 31 функция
+**Всего:** 36 функций
 
 ---
 
@@ -114,6 +117,13 @@ x-ui update       # Обновить
 ```bash
 curl -H "Authorization: Bearer API_KEY" http://localhost:8080/api/status
 curl -X POST -H "Authorization: Bearer API_KEY" http://localhost:8080/api/restart
+```
+
+### WARP
+```bash
+warp-cli status       # Статус
+warp-cli connect      # Подключить
+warp-cli disconnect   # Отключить
 ```
 
 ---
@@ -184,14 +194,25 @@ MIT License — см. [LICENSE](LICENSE)
 
 | Метрика | Значение |
 |---------|----------|
-| **Строк кода** | ~1080 |
-| **Функций** | 31 |
+| **Строк кода** | ~1600 |
+| **Функций** | 36 |
 | **Время установки** | 10-15 мин |
 | **RAM** | 512 MB мин. |
 
 ---
 
 ## 🎯 Changelog
+
+### v1.1.0 (2026-04-03)
+- ✅ WARP (Cloudflare): установка warp-cli с fallback на wgcf
+- ✅ Интерактивное меню `x-ui` через wrapper-скрипт (9 пунктов)
+- ✅ Nginx reverse proxy для X-UI — панель на `https://domain/webBasePath/`
+- ✅ SSL-сертификаты для подписок через Nginx
+- ✅ Случайный URI панели (16 символов) и подписки (24 символа)
+- ✅ Инициализация БД и учётных данных перед запуском
+- ✅ Устранён конфликт портов Nginx (443) и X-UI
+- ✅ Диагностика запуска: systemd, journalctl, dmesg, AppArmor
+- ✅ Летающие котики на странице-заглушке
 
 ### v1.0.3 (2026-04-01)
 - ✅ Docker: `docker.socket` + UFW `DEFAULT_FORWARD_POLICY`, порты Portainer/Uptime Kuma
@@ -219,7 +240,7 @@ MIT License — см. [LICENSE](LICENSE)
 
 <div align="center">
 
-**X-UI Ultimate Installer v1.0.3**
+**X-UI Ultimate Installer v1.1.0**
 
 [⬆️ Наверх](#-x-ui-ultimate-installer)
 
