@@ -371,8 +371,12 @@ if [[ "$ENABLE_WARP" == "y" ]]; then
 
     # Определяем публичный IP сервера ДО подключения WARP
     SERVER_IP=$(curl -s4 --max-time 5 ifconfig.me 2>/dev/null || curl -s4 --max-time 5 icanhazip.com 2>/dev/null || echo "")
+    SSH_PORT_ACTUAL="${SSH_PORT:-$(ss -tlnp | grep sshd | grep -oP ':\K[0-9]+(?=\s)' | head -1)}"
+    SSH_PORT_ACTUAL="${SSH_PORT_ACTUAL:-22}"
+
     if [[ -n "$SERVER_IP" ]]; then
-        log "IP сервера: ${SERVER_IP} (будет исключён из WARP для SSH)"
+        log "IP сервера: ${SERVER_IP}, SSH порт: ${SSH_PORT_ACTUAL}"
+        log "SSH трафик будет исключён из WARP туннеля"
     fi
 
     # Установка warp-cli
@@ -385,29 +389,46 @@ if [[ "$ENABLE_WARP" == "y" ]]; then
     if apt-get install -y cloudflare-warp 2>/dev/null; then
         success_log "WARP клиент установлен"
 
+        # === ЗАЩИТА SSH ДО подключения WARP ===
+        # iptables MARK для SSH трафика — WARP не перехватывает marked пакеты
+        if [[ -n "$SSH_PORT_ACTUAL" ]]; then
+            log "Защита SSH через iptables MARK..."
+            iptables -t mangle -A OUTPUT -p tcp --sport "${SSH_PORT_ACTUAL}" -j MARK --set-mark 0x1 2>/dev/null || true
+            iptables -t mangle -A OUTPUT -p tcp --dport "${SSH_PORT_ACTUAL}" -j MARK --set-mark 0x1 2>/dev/null || true
+            # Сохраняем правила для сохранения после перезагрузки
+            if command -v iptables-persistent &>/dev/null || apt-get install -y iptables-persistent &>/dev/null; then
+                netfilter-persistent save 2>/dev/null || true
+            fi
+        fi
+
         # Регистрация WARP
         warp-cli --accept-tos registration new 2>/dev/null || true
         warp-cli --accept-tos mode warp 2>/dev/null || true
 
-        # Split tunneling: исключаем IP сервера чтобы SSH не разорвался
+        # Split tunneling: исключаем IP сервера (дополнительно к iptables)
         if [[ -n "$SERVER_IP" ]]; then
-            # Исключаем IP сервера (чтобы SSH не шёл через WARP)
             warp-cli --accept-tos add-excluded-route "${SERVER_IP}/32" 2>/dev/null || true
-            # Исключаем локальные сети
             warp-cli --accept-tos add-excluded-route "10.0.0.0/8" 2>/dev/null || true
             warp-cli --accept-tos add-excluded-route "172.16.0.0/12" 2>/dev/null || true
             warp-cli --accept-tos add-excluded-route "192.168.0.0/16" 2>/dev/null || true
-            log "Split tunneling: SSH не идёт через WARP"
         fi
 
         warp-cli --accept-tos connect 2>/dev/null || true
 
-        # Проверяем статус подключения
-        sleep 5
-        if warp-cli --accept-tos status 2>/dev/null | grep -qi "connected\|update"; then
-            success_log "WARP подключён (SSH в безопасности)"
+        # Проверяем что SSH всё ещё работает ПОСЛЕ подключения WARP
+        sleep 3
+        if ss -tlnp | grep -q ":${SSH_PORT_ACTUAL}\s"; then
+            success_log "WARP подключён, SSH порт ${SSH_PORT_ACTUAL} активен"
         else
-            warn_log "WARP: статус неизвест — проверьте вручную: warp-cli status"
+            warn_log "WARP: SSH порт ${SSH_PORT_ACTUAL} не слушается!"
+        fi
+
+        # Проверяем статус подключения
+        sleep 2
+        if warp-cli --accept-tos status 2>/dev/null | grep -qi "connected\|update"; then
+            success_log "WARP статус: подключён"
+        else
+            warn_log "WARP: статус неизвест — проверьте: warp-cli status"
         fi
 
         # Отключаем WARP от systemd-resolved (может конфликтовать)
@@ -421,10 +442,14 @@ if [[ "$ENABLE_WARP" == "y" ]]; then
             wgcf register --accept-tos 2>/dev/null || true
             wgcf generate 2>/dev/null || true
             if [[ -f wgcf-profile.conf ]]; then
-                # Добавляем PostUp/PostDown для исключения IP сервера из WARP туннеля
+                # Добавляем PostUp/PostDown для исключения IP сервера и SSH порта из WARP туннеля
                 if [[ -n "$SERVER_IP" ]]; then
-                    sed -i "s|AllowedIPs = 0.0.0.0/0|AllowedIPs = 0.0.0.0/0\nPostUp = ip rule add to ${SERVER_IP}/32 table main\nPostDown = ip rule delete to ${SERVER_IP}/32 table main|" wgcf-profile.conf
-                    log "wgcf: IP сервера ${SERVER_IP} исключён из туннеля"
+                    WG_RULES="PostUp = ip rule add to ${SERVER_IP}/32 table main
+PostDown = ip rule delete to ${SERVER_IP}/32 table main
+PostUp = iptables -t mangle -A OUTPUT -p tcp --sport ${SSH_PORT_ACTUAL} -j MARK --set-mark 0x1
+PostDown = iptables -t mangle -D OUTPUT -p tcp --sport ${SSH_PORT_ACTUAL} -j MARK --set-mark 0x1 2>/dev/null"
+                    sed -i "s|AllowedIPs = 0.0.0.0/0|AllowedIPs = 0.0.0.0/0\n${WG_RULES}|" wgcf-profile.conf
+                    log "wgcf: SSH и IP сервера исключены из туннеля"
                 fi
                 cp wgcf-profile.conf /etc/wireguard/warp.conf
                 systemctl enable --now wg-quick@warp 2>/dev/null || true
