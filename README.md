@@ -209,6 +209,10 @@ MIT License — см. [LICENSE](LICENSE)
 ### v1.2.0 (2026-04-03)
 - ✅ WARP **proxy mode** — SOCKS5 на 127.0.0.1:40000, не разрывает SSH/Nginx
 - ✅ Telegram бот автоматически использует WARP прокси
+- ✅ `x-ui setting` вызывается по одному параметру — не все сразу
+- ✅ Увеличен timeout инициализации БД до 8 сек
+- ✅ Fallback: sqlite3 UPDATE для username и webBasePath
+- ✅ Исправлена ошибка SSL cp 'same file' при symlink
 
 ### v1.1.0 (2026-04-03)
 - ✅ Интерактивное меню `x-ui` через wrapper-скрипт (10 пунктов)

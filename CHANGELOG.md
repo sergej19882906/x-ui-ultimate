@@ -14,8 +14,11 @@
 
 ### Fixed
 - WARP **не разрывает SSH и Nginx** — proxy mode не меняет маршрутизацию
-- Telegram бот автоматически использует WARP прокси
-- Удалён wgcf fallback и сложные iptables MARK правила
+- SSL cp обрывал скрипт — 'same file' ошибка при symlink
+- x-ui setting вызывается по одному параметру — не все сразу
+- Увеличен timeout инициализации БД до 8 сек
+- Fallback: sqlite3 UPDATE для username и webBasePath
+- Symlink SSL с rm -f перед ln -sf
 
 ---
 
