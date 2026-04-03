@@ -144,12 +144,8 @@ fi
 if [[ "$USE_CDN" == "y" ]]; then
     RANDOM_PORT=$((RANDOM % 57000 + 8000))
 else
-    read -r -p "Порт 443? (y/n): " USE_PORT_443
-    if [[ "$USE_PORT_443" == "y" ]]; then
-        RANDOM_PORT="443"
-    else
-        RANDOM_PORT=$((RANDOM % 57000 + 8000))
-    fi
+    # X-UI всегда на внутреннем порту — Nginx проксирует через 443
+    RANDOM_PORT=$((RANDOM % 57000 + 20000))
 fi
 
 # Сохраняем порт для использования в скриптах
@@ -918,6 +914,23 @@ server {
     ssl_protocols TLSv1.2 TLSv1.3;
     root /var/www/html;
     index index.html;
+
+    # Reverse proxy к X-UI панели
+    location /${XUI_WEB_PATH}/ {
+        proxy_pass http://127.0.0.1:${RANDOM_PORT}/;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+    # Без слэша — редирект на слэш для корректной работы
+    location =/${XUI_WEB_PATH} {
+        return 301 https://\$server_name/${XUI_WEB_PATH}/;
+    }
+
     location / { try_files \$uri \$uri/ =404; }
     server_tokens off;
 }
@@ -1056,9 +1069,9 @@ cat > /root/x-ui-credentials.txt << CREDS
 ╠═══════════════════════════════════════════════════════════╣
 Дата: $(date '+%Y-%m-%d %H:%M:%S')
 Домен: ${DOMAIN}
-Порт: ${RANDOM_PORT}
+URL: https://${DOMAIN}/${XUI_WEB_PATH}/
+Внутренний порт X-UI: ${RANDOM_PORT}
 URI панели: /${XUI_WEB_PATH}
-URL: https://${DOMAIN}:${RANDOM_PORT}/${XUI_WEB_PATH}
 URI подписки: /${SUB_PATH}
 Логин: ${XUI_USERNAME}
 Пароль: ${XUI_PASSWORD}
@@ -1141,14 +1154,14 @@ if [[ "$CREATE_SUBSCRIPTION" == "y" ]]; then
     cat > /usr/local/x-ui/generate-subscription.sh << SUBSH
 #!/bin/bash
 SUB="/usr/local/x-ui/subscriptions.txt"
-DOMAIN=\$(cat /root/x-ui-credentials.txt 2>/dev/null | grep "Домен:" | awk '{print \$2}')
-PORT=\$(cat /root/x-ui-port.txt 2>/dev/null || echo "8080")
-SUB_URI=\$(cat /root/x-ui-credentials.txt 2>/dev/null | grep "URI подписки:" | awk '{print \$3}')
-[[ -z "\$SUB_URI" ]] && SUB_URI="$(cat /root/x-ui-sub-path.txt 2>/dev/null || echo "sub")"
+DOMAIN=\$(grep "Домен:" /root/x-ui-credentials.txt 2>/dev/null | awk '{print \$2}')
+SUB_URI=\$(grep "URI подписки:" /root/x-ui-credentials.txt 2>/dev/null | awk '{print \$3}')
+[[ -z "\$SUB_URI" ]] && SUB_URI=\$(cat /root/x-ui-sub-path.txt 2>/dev/null)
+[[ -z "\$SUB_URI" ]] && SUB_URI="sub"
 echo "# X-UI Subscriptions - \$(date)" > "\$SUB"
 x-ui link 2>/dev/null | grep -iE 'vless|trojan|vmess' >> "\$SUB" || echo "No links" >> "\$SUB"
 base64 -w0 "\$SUB" > /usr/local/x-ui/subscription-b64.txt
-echo "URL: https://\${DOMAIN}:\${PORT}/\${SUB_URI}/"
+echo "URL: https://\${DOMAIN}\${SUB_URI}/"
 SUBSH
     chmod +x /usr/local/x-ui/generate-subscription.sh
     # Сохраняем URI подписки для справки
@@ -1417,7 +1430,8 @@ fi
 
 echo ""
 echo -e "${CYAN}🔐 Доступ:${NC}"
-echo -e "  URL:    ${GREEN}https://${DOMAIN}:${RANDOM_PORT}/${XUI_WEB_PATH}${NC}"
+echo -e "  URL:    ${GREEN}https://${DOMAIN}/${XUI_WEB_PATH}/${NC}"
+echo -e "  (внутренний порт X-UI: ${RANDOM_PORT})"
 echo -e "  Логин:  ${YELLOW}${XUI_USERNAME}${NC}"
 echo -e "  Пароль: ${YELLOW}${XUI_PASSWORD}${NC}"
 echo -e "  API:    ${YELLOW}${API_KEY}${NC}"
@@ -1433,7 +1447,7 @@ echo -e "  x-ui              - меню"
 echo -e "  x-ui status       - статус"
 if [[ "$CREATE_SUBSCRIPTION" == "y" ]]; then
     echo -e "  generate-subscription.sh - подписки"
-    echo -e "  Подписка: https://${DOMAIN}:${RANDOM_PORT}/${SUB_PATH}/"
+    echo -e "  Подписка: https://${DOMAIN}${SUB_PATH}/"
 fi
 if [[ "$GENERATE_QR" == "y" ]]; then
     echo -e "  generate-qr.sh          - QR коды"
