@@ -241,12 +241,15 @@ XUI_PASSWORD=$(head /dev/urandom | tr -dc 'A-Za-z0-9@#%_' | head -c 20)
 API_KEY=$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 32)
 # Безопасный URI панели (случайный сложный путь)
 XUI_WEB_PATH=$(head /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 16)
+# Безопасный URI подписки (случайный сложный путь)
+SUB_PATH=$(head /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 24)
 ARCH=$(uname -m)
 
 log "Порт: ${CYAN}${RANDOM_PORT}${NC}"
 log "Логин: ${CYAN}${XUI_USERNAME}${NC}"
 log "Пароль: ${CYAN}${XUI_PASSWORD}${NC}"
 log "URI панели: ${CYAN}/${XUI_WEB_PATH}${NC}"
+log "URI подписки: ${CYAN}/${SUB_PATH}${NC}"
 
 # =============================================================================
 # Протоколы
@@ -1054,8 +1057,9 @@ cat > /root/x-ui-credentials.txt << CREDS
 Дата: $(date '+%Y-%m-%d %H:%M:%S')
 Домен: ${DOMAIN}
 Порт: ${RANDOM_PORT}
-URI: /${XUI_WEB_PATH}
+URI панели: /${XUI_WEB_PATH}
 URL: https://${DOMAIN}:${RANDOM_PORT}/${XUI_WEB_PATH}
+URI подписки: /${SUB_PATH}
 Логин: ${XUI_USERNAME}
 Пароль: ${XUI_PASSWORD}
 SSH Порт: ${SSH_PORT}
@@ -1139,12 +1143,17 @@ if [[ "$CREATE_SUBSCRIPTION" == "y" ]]; then
 SUB="/usr/local/x-ui/subscriptions.txt"
 DOMAIN=\$(cat /root/x-ui-credentials.txt 2>/dev/null | grep "Домен:" | awk '{print \$2}')
 PORT=\$(cat /root/x-ui-port.txt 2>/dev/null || echo "8080")
+SUB_URI=\$(cat /root/x-ui-credentials.txt 2>/dev/null | grep "URI подписки:" | awk '{print \$3}')
+[[ -z "\$SUB_URI" ]] && SUB_URI="$(cat /root/x-ui-sub-path.txt 2>/dev/null || echo "sub")"
 echo "# X-UI Subscriptions - \$(date)" > "\$SUB"
 x-ui link 2>/dev/null | grep -iE 'vless|trojan|vmess' >> "\$SUB" || echo "No links" >> "\$SUB"
 base64 -w0 "\$SUB" > /usr/local/x-ui/subscription-b64.txt
-echo "URL: https://\${DOMAIN}:\${PORT}/sub/"
+echo "URL: https://\${DOMAIN}:\${PORT}/\${SUB_URI}/"
 SUBSH
     chmod +x /usr/local/x-ui/generate-subscription.sh
+    # Сохраняем URI подписки для справки
+    echo "${SUB_PATH}" > /root/x-ui-sub-path.txt
+    chmod 600 /root/x-ui-sub-path.txt
 fi
 
 # =============================================================================
@@ -1424,6 +1433,7 @@ echo -e "  x-ui              - меню"
 echo -e "  x-ui status       - статус"
 if [[ "$CREATE_SUBSCRIPTION" == "y" ]]; then
     echo -e "  generate-subscription.sh - подписки"
+    echo -e "  Подписка: https://${DOMAIN}:${RANDOM_PORT}/${SUB_PATH}/"
 fi
 if [[ "$GENERATE_QR" == "y" ]]; then
     echo -e "  generate-qr.sh          - QR коды"
