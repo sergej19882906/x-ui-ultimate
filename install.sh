@@ -642,12 +642,32 @@ if [[ -f /usr/local/x-ui/x-ui ]]; then
         sleep 2
     fi
 
+    # Определяем пути к SSL сертификатам для x-ui panel
+    XUI_CERT=""
+    XUI_KEY=""
+    if [[ "$USE_ZEROSL" == "y" ]]; then
+        XUI_CERT="/usr/local/x-ui/cert/fullchain.crt"
+        XUI_KEY="/usr/local/x-ui/cert/server.key"
+    elif [[ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]]; then
+        XUI_CERT="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
+        XUI_KEY="/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
+    fi
+
     # Устанавливаем учётные данные через x-ui commands
     # x-ui username и x-ui password — стандартные команды для 3x-ui
-    /usr/local/x-ui/x-ui setting -username "${XUI_USERNAME}" -password "${XUI_PASSWORD}" -port "${RANDOM_PORT}" 2>/dev/null || \
-        warn_log "x-ui setting не поддерживается — учётные данные будут заданы вручную"
+    if [[ -n "$XUI_CERT" && -n "$XUI_KEY" ]]; then
+        log "Настройка SSL для x-ui panel..."
+        /usr/local/x-ui/x-ui setting \
+            -username "${XUI_USERNAME}" \
+            -password "${XUI_PASSWORD}" \
+            -port "${RANDOM_PORT}" \
+            -cert "$XUI_CERT" \
+            -key "$XUI_KEY" 2>/dev/null && \
+            success_log "Учётные данные и SSL установлены" || \
+            warn_log "x-ui setting с SSL не поддерживается — пробуем без SSL"
+    fi
 
-    # Для vaxilu/x-ui используем альтернативный метод — прямой запрос через stdin
+    # Fallback: без SSL параметров
     if ! /usr/local/x-ui/x-ui setting -username "${XUI_USERNAME}" &>/dev/null; then
         warn_log "Пробуем альтернативный метод установки учётных данных..."
         # Генерируем хеш пароля и записываем прямо в БД через SQLite
@@ -662,6 +682,25 @@ if [[ -f /usr/local/x-ui/x-ui ]]; then
         fi
     else
         success_log "Учётные данные установлены"
+    fi
+
+    # Если SSL не настроен через setting, копируем сертификаты в папку x-ui
+    # и создаём конфиг для panel
+    if [[ -n "$XUI_CERT" && -n "$XUI_KEY" ]]; then
+        # Убеждаемся что x-ui видит сертификаты
+        if [[ ! -f "$XUI_CERT" ]]; then
+            warn_log "SSL сертификат не найден: $XUI_CERT"
+        fi
+        if [[ ! -f "$XUI_KEY" ]]; then
+            warn_log "SSL ключ не найден: $XUI_KEY"
+        fi
+        # Создаём symlink из letsencrypt в папку x-ui для надёжности
+        if [[ "$USE_ZEROSL" != "y" && -d "/etc/letsencrypt/live/${DOMAIN}" ]]; then
+            mkdir -p /usr/local/x-ui/cert
+            ln -sf "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" /usr/local/x-ui/cert/server.crt
+            ln -sf "/etc/letsencrypt/live/${DOMAIN}/privkey.pem" /usr/local/x-ui/cert/server.key
+            log "Symlink SSL: /usr/local/x-ui/cert -> Let's Encrypt"
+        fi
     fi
 fi
 
