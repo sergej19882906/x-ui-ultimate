@@ -760,9 +760,20 @@ log "Nginx..."
 apt install -y nginx
 
 cat > /var/www/html/index.html << 'CATHTML'
-<!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8"><title>Кото-Сервер</title>
-<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:sans-serif;background:linear-gradient(135deg,#2c1810,#1a1a2e);min-height:100vh;color:#fff;display:flex;align-items:center;justify-content:center}.container{text-align:center;padding:40px}.cat{font-size:100px;animation:bounce 2s infinite}@keyframes bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-20px)}}h1{font-size:3rem;background:linear-gradient(90deg,#ff9a56,#ff6b6b);-webkit-background-clip:text;-webkit-text-fill-color:transparent}p{color:#b8a092;margin:20px 0}.status{display:inline-block;padding:10px 25px;background:rgba(102,252,143,0.1);border:2px solid #66fc91;border-radius:50px;color:#66fc91}.btn{display:inline-block;margin-top:30px;padding:15px 40px;background:linear-gradient(135deg,#ff9a56,#ff6b6b);color:#fff;text-decoration:none;border-radius:50px}</style></head>
-<body><div class="container"><div class="cat">🐱</div><h1>Мяу-Сервер</h1><p>Сервер охраняется котиками 24/7</p><div class="status">Онлайн</div></div></body></html>
+<!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Кото-Сервер</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:sans-serif;background:linear-gradient(135deg,#2c1810,#1a1a2e);min-height:100vh;color:#fff;display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative}.container{text-align:center;padding:40px;z-index:10;position:relative}.cat{font-size:100px;animation:bounce 2s infinite}@keyframes bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-20px)}}h1{font-size:3rem;background:linear-gradient(90deg,#ff9a56,#ff6b6b);-webkit-background-clip:text;-webkit-text-fill-color:transparent}p{color:#b8a092;margin:20px 0}.status{display:inline-block;padding:10px 25px;background:rgba(102,252,143,0.1);border:2px solid #66fc91;border-radius:50px;color:#66fc91}.flying-cat{position:fixed;font-size:40px;opacity:0.7;animation:fly linear infinite;pointer-events:none;z-index:1}@keyframes fly{0%{transform:translateX(-100px) rotate(0deg) scale(0.6)}25%{transform:translateX(25vw) rotate(15deg) scale(0.8) translateY(-30px)}50%{transform:translateX(50vw) rotate(-10deg) scale(1) translateY(-15px)}75%{transform:translateX(75vw) rotate(20deg) scale(0.9) translateY(-40px)}100%{transform:translateX(calc(100vw + 100px)) rotate(0deg) scale(0.6)}}.flying-cat:nth-child(1){top:10%;animation-duration:12s;animation-delay:0s;font-size:36px}.flying-cat:nth-child(2){top:25%;animation-duration:15s;animation-delay:3s;font-size:44px}.flying-cat:nth-child(3){top:45%;animation-duration:10s;animation-delay:1s;font-size:32px}.flying-cat:nth-child(4){top:60%;animation-duration:18s;animation-delay:5s;font-size:50px}.flying-cat:nth-child(5){top:75%;animation-duration:14s;animation-delay:2s;font-size:38px}.flying-cat:nth-child(6){top:85%;animation-duration:11s;animation-delay:7s;font-size:42px}.flying-cat:nth-child(7){top:5%;animation-duration:16s;animation-delay:4s;font-size:30px}.flying-cat:nth-child(8){top:50%;animation-duration:13s;animation-delay:6s;font-size:46px}.flying-cat:nth-child(9){top:35%;animation-duration:17s;animation-delay:8s;font-size:34px}.flying-cat:nth-child(10){top:90%;animation-duration:9s;animation-delay:1s;font-size:40px}</style></head>
+<body>
+<div class="flying-cat">🐱</div>
+<div class="flying-cat">🐈</div>
+<div class="flying-cat">😺</div>
+<div class="flying-cat">🐱</div>
+<div class="flying-cat">😸</div>
+<div class="flying-cat">🐈‍⬛</div>
+<div class="flying-cat">🐱</div>
+<div class="flying-cat">😻</div>
+<div class="flying-cat">🐈</div>
+<div class="flying-cat">😺</div>
+<div class="container"><div class="cat">🐱</div><h1>Мяу-Сервер</h1><p>Сервер охраняется котиками 24/7</p><div class="status">Онлайн</div></div></body></html>
 CATHTML
 
 IPV6_HTTP=""
