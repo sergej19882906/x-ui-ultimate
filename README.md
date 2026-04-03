@@ -67,8 +67,8 @@ UFW, Fail2ban, SSH hardening, 2FA, AppArmor, DDoS защита, SOCKS5 прок�
 ### 🌐 Сеть (3)
 IPv6, TCP BBR, Cloudflare CDN
 
-### 🛡️ Обход блокировок (8)
-WARP, WebSocket, gRPC, ShadowTLS, Reality, Hysteria 2, Tuic, WireGuard
+### 🛡️ Обход блокировок (9)
+WARP Proxy (SOCKS5), WebSocket, gRPC, ShadowTLS, Reality, Hysteria 2, Tuic, WireGuard, SOCKS5 Dante
 
 ### 🔐 Безопасность панели (3)
 Случайный URI панели (16 символов), случайный URI подписки (24 символа), Nginx reverse proxy
@@ -121,10 +121,13 @@ curl -X POST -H "Authorization: Bearer API_KEY" http://localhost:8080/api/restar
 
 ### WARP
 ```bash
-warp-cli status       # Статус
-warp-cli connect      # Подключить
-warp-cli disconnect   # Отключить
+warp-cli status           # Статус WARP
+warp-cli connect          # Подключить
+warp-cli disconnect       # Отключить
+x-ui warp                 # Статус WARP + порты
 ```
+WARP работает в режиме **proxy** (SOCKS5 на 127.0.0.1:40000) — не разрывает SSH и Nginx.
+Telegram бот автоматически использует WARP прокси.
 
 ---
 

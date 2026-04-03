@@ -133,10 +133,11 @@ sudo ./install.sh
 - Nginx reverse proxy
 
 ### 🧦 SOCKS5 прокси
-- Dante сервер на 127.0.0.1:1080
+- WARP proxy mode: SOCKS5 на 127.0.0.1:40000
+- Dante сервер на 127.0.0.1:1080 (дополнительный)
 - Авторизация username/password
-- Telegram бот ходит через SOCKS5
-- Изоляция: только localhost и 10.0.0.0/8
+- Telegram бот ходит через WARP прокси
+- Не разрывает SSH и Nginx (proxy mode не меняет маршрутизацию)
 
 ---
 
@@ -158,10 +159,19 @@ x-ui update       # Обновить
 systemctl status x-ui
 systemctl restart x-ui
 journalctl -u x-ui -f
-systemctl status danted    # SOCKS5
+systemctl status danted    # SOCKS5 Dante
 systemctl restart danted
 journalctl -u danted -f
 ```
+
+### WARP
+```bash
+warp-cli status            # Статус WARP
+warp-cli connect           # Подключить
+warp-cli disconnect        # Отключить
+x-ui warp                  # Полная диагностика
+```
+WARP в режиме **proxy** — не меняет маршрутизацию, SSH и Nginx работают как обычно.
 
 ### Скрипты
 ```bash
