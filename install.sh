@@ -762,7 +762,7 @@ apt install -y nginx
 cat > /var/www/html/index.html << 'CATHTML'
 <!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8"><title>Кото-Сервер</title>
 <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:sans-serif;background:linear-gradient(135deg,#2c1810,#1a1a2e);min-height:100vh;color:#fff;display:flex;align-items:center;justify-content:center}.container{text-align:center;padding:40px}.cat{font-size:100px;animation:bounce 2s infinite}@keyframes bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-20px)}}h1{font-size:3rem;background:linear-gradient(90deg,#ff9a56,#ff6b6b);-webkit-background-clip:text;-webkit-text-fill-color:transparent}p{color:#b8a092;margin:20px 0}.status{display:inline-block;padding:10px 25px;background:rgba(102,252,143,0.1);border:2px solid #66fc91;border-radius:50px;color:#66fc91}.btn{display:inline-block;margin-top:30px;padding:15px 40px;background:linear-gradient(135deg,#ff9a56,#ff6b6b);color:#fff;text-decoration:none;border-radius:50px}</style></head>
-<body><div class="container"><div class="cat">🐱</div><h1>Мяу-Сервер</h1><p>Сервер охраняется котиками 24/7</p><div class="status">Онлайн</div><br><a href="/admin" class="btn">Войти</a></div></body></html>
+<body><div class="container"><div class="cat">🐱</div><h1>Мяу-Сервер</h1><p>Сервер охраняется котиками 24/7</p><div class="status">Онлайн</div></div></body></html>
 CATHTML
 
 IPV6_HTTP=""
