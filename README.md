@@ -206,10 +206,11 @@ MIT License — см. [LICENSE](LICENSE)
 
 ## 🎯 Changelog
 
-### v1.1.0 (2026-04-03)
-- ✅ WARP (Cloudflare) в режиме **proxy** — SOCKS5 на 127.0.0.1:40000
-- ✅ **Не разрывает SSH и Nginx** — proxy mode не меняет маршрутизацию
+### v1.2.0 (2026-04-03)
+- ✅ WARP **proxy mode** — SOCKS5 на 127.0.0.1:40000, не разрывает SSH/Nginx
 - ✅ Telegram бот автоматически использует WARP прокси
+
+### v1.1.0 (2026-04-03)
 - ✅ Интерактивное меню `x-ui` через wrapper-скрипт (10 пунктов)
 - ✅ Nginx reverse proxy для X-UI — панель на `https://domain/webBasePath/`
 - ✅ SSL-сертификаты для подписок через Nginx
