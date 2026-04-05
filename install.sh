@@ -1410,19 +1410,44 @@ CERTTEMP
 
         # Проверяем конфигурацию и запускаем Nginx
         if nginx -t 2>&1; then
-            systemctl start nginx 2>/dev/null || service nginx start 2>/dev/null || nginx 2>/dev/null
+            log "Nginx конфигурация валидна, запускаем..."
+
+            # Пробуем запустить разными методами
+            if systemctl start nginx 2>/dev/null; then
+                success_log "Nginx запущен через systemctl"
+            elif service nginx start 2>/dev/null; then
+                success_log "Nginx запущен через service"
+            elif nginx 2>/dev/null; then
+                success_log "Nginx запущен напрямую"
+            else
+                error_log "Не удалось запустить Nginx"
+                journalctl -u nginx -n 20 --no-pager 2>/dev/null || true
+                cat /var/log/nginx/error.log 2>/dev/null | tail -10 || true
+            fi
+
             sleep 2
+
+            # Проверяем что Nginx действительно запущен
+            if systemctl is-active --quiet nginx 2>/dev/null || pgrep nginx >/dev/null; then
+                success_log "Nginx работает"
+            else
+                warn_log "Nginx может быть не запущен — пробуем продолжить"
+            fi
         else
             error_log "Nginx конфигурация невалидна"
             cat /var/log/nginx/error.log 2>/dev/null | tail -10
         fi
 
         # Получаем сертификат через webroot
-        if certbot certonly --webroot -w /var/www/letsencrypt --non-interactive --agree-tos --email "${SSL_EMAIL}" "${LE_DOMAIN_ARGS[@]}"; then
+        log "Получение SSL сертификата через webroot..."
+        if certbot certonly --webroot -w /var/www/letsencrypt --non-interactive --agree-tos --email "${SSL_EMAIL}" "${LE_DOMAIN_ARGS[@]}" 2>&1 | tee /tmp/certbot.log; then
             SSL_OK=true
+            success_log "SSL сертификат получен"
         else
-            error_log "Certbot webroot не сработал — проверьте DNS записи"
-            cat /var/log/letsencrypt/letsencrypt.log 2>/dev/null | tail -20
+            error_log "Certbot webroot не сработал"
+            echo "=== Последние 30 строк лога certbot ==="
+            cat /var/log/letsencrypt/letsencrypt.log 2>/dev/null | tail -30 || cat /tmp/certbot.log | tail -30
+            echo "=== Проверьте DNS записи и доступность домена ==="
         fi
 
         # Удаляем временный конфиг и останавливаем Nginx
