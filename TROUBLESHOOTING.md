@@ -253,6 +253,7 @@ x-ui
 ### Симптомы:
 - `ERR_SSL_PROTOCOL_ERROR`
 - `NET::ERR_CERT_AUTHORITY_INVALID`
+- `Could not bind TCP port 80 because it is already in use`
 - Сертификат не применяется
 
 ### Диагностика:
@@ -266,11 +267,32 @@ cat /etc/nginx/sites-available/x-ui.conf | grep ssl
 
 # 3. Проверить права
 ls -la /etc/letsencrypt/live/*/
+
+# 4. Проверить порт 80
+ss -tlnp | grep :80
 ```
 
 ### Решения:
 
-**Проблема 1: Сертификат не получен**
+**Проблема 1: Порт 80 занят (certbot не может получить сертификат)**
+
+Скрипт автоматически определяет занятость порта и использует:
+- **standalone** метод если порт 80 свободен
+- **webroot** метод если порт 80 занят
+
+Ручное решение:
+```bash
+# Остановить процесс на порту 80
+ss -tlnp | grep :80
+fuser -k 80/tcp
+
+# Или использовать webroot метод
+mkdir -p /var/www/letsencrypt
+certbot certonly --webroot -w /var/www/letsencrypt \
+  -d yourdomain.com --email admin@yourdomain.com --agree-tos
+```
+
+**Проблема 2: Сертификат не получен**
 ```bash
 # Остановить Nginx
 systemctl stop nginx

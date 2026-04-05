@@ -1300,7 +1300,24 @@ LE_DOMAIN_ARGS=( -d "$DOMAIN" )
 [[ -n "$PORTAINER_HTTPS_HOST" ]] && LE_DOMAIN_ARGS+=( -d "$PORTAINER_HTTPS_HOST" )
 [[ -n "$KUMA_HTTPS_HOST" ]] && LE_DOMAIN_ARGS+=( -d "$KUMA_HTTPS_HOST" )
 
-systemctl stop nginx 2>/dev/null || true
+# Проверяем занят ли порт 80
+PORT_80_BUSY=false
+if ss -tlnp | grep -q ':80\s'; then
+    PORT_80_BUSY=true
+    warn_log "Порт 80 занят — будем использовать webroot метод для certbot"
+fi
+
+# Останавливаем Nginx только если порт 80 занят им
+if [[ "$PORT_80_BUSY" == "true" ]]; then
+    if systemctl is-active --quiet nginx; then
+        log "Останавливаем Nginx для получения SSL..."
+        systemctl stop nginx
+        sleep 2
+        PORT_80_BUSY=false
+    else
+        warn_log "Порт 80 занят другим процессом — certbot может не сработать"
+    fi
+fi
 
 if [[ "$USE_ZEROSSL" == "y" ]]; then
     # shellcheck disable=SC1090
@@ -1326,25 +1343,66 @@ fi
 
 if [[ "$USE_ZEROSSL" != "y" ]]; then
     apt install -y certbot
-    if [[ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]]; then
-        warn_log "SSL: Let's Encrypt — обновление/расширение сертификата и копирование в x-ui"
-        certbot certonly --standalone --cert-name "$DOMAIN" --expand --non-interactive --agree-tos --email "${SSL_EMAIL}" "${LE_DOMAIN_ARGS[@]}" || \
-            warn_log "certbot expand: если не прошло — проверьте DNS для поддоменов"
-        certbot renew --non-interactive --cert-name "$DOMAIN" 2>/dev/null || certbot renew --non-interactive 2>/dev/null || true
+
+    # Метод получения сертификата зависит от состояния порта 80
+    if [[ "$PORT_80_BUSY" == "true" ]]; then
+        # Порт 80 занят — используем webroot через временный Nginx конфиг
+        warn_log "Используем webroot метод (порт 80 занят)"
+
+        mkdir -p /var/www/letsencrypt
+
+        # Временный Nginx конфиг для webroot
+        cat > /etc/nginx/sites-available/certbot-temp.conf << 'CERTTEMP'
+server {
+    listen 80;
+    server_name _;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/letsencrypt;
+    }
+
+    location / {
+        return 404;
+    }
+}
+CERTTEMP
+        ln -sf /etc/nginx/sites-available/certbot-temp.conf /etc/nginx/sites-enabled/
+        nginx -t && systemctl start nginx
+
+        # Получаем сертификат через webroot
+        if certbot certonly --webroot -w /var/www/letsencrypt --non-interactive --agree-tos --email "${SSL_EMAIL}" "${LE_DOMAIN_ARGS[@]}"; then
+            SSL_OK=true
+        else
+            error_log "Certbot webroot не сработал — проверьте DNS записи"
+        fi
+
+        # Удаляем временный конфиг
+        rm -f /etc/nginx/sites-enabled/certbot-temp.conf
+        systemctl stop nginx
+    else
+        # Порт 80 свободен — используем standalone
+        if [[ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]]; then
+            warn_log "SSL: Let's Encrypt — обновление/расширение сертификата"
+            certbot certonly --standalone --cert-name "$DOMAIN" --expand --non-interactive --agree-tos --email "${SSL_EMAIL}" "${LE_DOMAIN_ARGS[@]}" || \
+                warn_log "certbot expand: если не прошло — проверьте DNS для поддоменов"
+            certbot renew --non-interactive --cert-name "$DOMAIN" 2>/dev/null || certbot renew --non-interactive 2>/dev/null || true
+            SSL_OK=true
+        elif certbot certonly --standalone --non-interactive --agree-tos --email "${SSL_EMAIL}" "${LE_DOMAIN_ARGS[@]}"; then
+            SSL_OK=true
+        else
+            error_log "Certbot standalone не сработал"
+        fi
+    fi
+
+    # Копируем сертификаты в x-ui
+    if [[ "$SSL_OK" == "true" && -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]]; then
         mkdir -p /usr/local/x-ui/cert
         # Удаляем старые файлы/symlink чтобы cp не следовал по ссылке
         rm -f /usr/local/x-ui/cert/server.crt /usr/local/x-ui/cert/server.key /usr/local/x-ui/cert/fullchain.crt
         cp /etc/letsencrypt/live/"$DOMAIN"/fullchain.pem /usr/local/x-ui/cert/server.crt
         cp /etc/letsencrypt/live/"$DOMAIN"/privkey.pem /usr/local/x-ui/cert/server.key
         chmod 600 /usr/local/x-ui/cert/server.key
-        SSL_OK=true
-    elif certbot certonly --standalone --non-interactive --agree-tos --email "${SSL_EMAIL}" "${LE_DOMAIN_ARGS[@]}"; then
-        mkdir -p /usr/local/x-ui/cert
-        rm -f /usr/local/x-ui/cert/server.crt /usr/local/x-ui/cert/server.key /usr/local/x-ui/cert/fullchain.crt
-        cp /etc/letsencrypt/live/"$DOMAIN"/fullchain.pem /usr/local/x-ui/cert/server.crt
-        cp /etc/letsencrypt/live/"$DOMAIN"/privkey.pem /usr/local/x-ui/cert/server.key
-        chmod 600 /usr/local/x-ui/cert/server.key
-        SSL_OK=true
+        success_log "SSL сертификаты скопированы в /usr/local/x-ui/cert/"
     fi
 fi
 
