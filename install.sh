@@ -516,7 +516,7 @@ if [[ "$ENABLE_NAIVE" == "y" ]]; then
             # Генерация учётных данных
             NAIVE_USER="user$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 6)"
             NAIVE_PASS=$(head /dev/urandom | tr -dc 'A-Za-z0-9@#%_' | head -c 20)
-            NAIVE_PORT=8443
+            NAIVE_PORT=443
 
             # Caddyfile конфигурация
             mkdir -p /etc/caddy-naive
@@ -600,7 +600,7 @@ if [[ "$ENABLE_CLOAK" == "y" ]]; then
                 CLOAK_PUBKEY=$(/usr/local/bin/ck-server -k 2>/dev/null | grep "Public" | awk '{print $3}')
                 CLOAK_PRIVKEY=$(/usr/local/bin/ck-server -k 2>/dev/null | grep "Private" | awk '{print $3}')
                 CLOAK_ADMINUID=$(/usr/local/bin/ck-server -u 2>/dev/null | head -1)
-                CLOAK_PORT=8443
+                CLOAK_PORT=443
 
                 # Конфигурация
                 mkdir -p /etc/cloak
@@ -746,7 +746,7 @@ ufw allow 80/tcp
 ufw allow 443/tcp
 ufw allow "${RANDOM_PORT}"/tcp
 if [[ "$ENABLE_OBFUSCATION" == "y" ]]; then
-    for _ufw_p in 8080 8443 2053 2083 2087 2096; do
+    for _ufw_p in 8080 2053 2083 2087 2096; do
         ufw allow "${_ufw_p}"/tcp
     done
 fi
