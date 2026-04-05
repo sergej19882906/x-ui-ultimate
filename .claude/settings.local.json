@@ -4,7 +4,15 @@
       "Bash(bash -n install.sh)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(fuser -v 80/tcp)",
+      "Bash(netstat -tlnp)",
+      "Bash(systemctl status:*)",
+      "Bash(netstat -ano)",
+      "Bash(findstr \":80 \")",
+      "Bash(tasklist)",
+      "Bash(findstr \" 4 \")",
+      "Bash(sc query:*)"
     ]
   }
 }

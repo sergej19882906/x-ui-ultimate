@@ -1300,16 +1300,38 @@ LE_DOMAIN_ARGS=( -d "$DOMAIN" )
 [[ -n "$PORTAINER_HTTPS_HOST" ]] && LE_DOMAIN_ARGS+=( -d "$PORTAINER_HTTPS_HOST" )
 [[ -n "$KUMA_HTTPS_HOST" ]] && LE_DOMAIN_ARGS+=( -d "$KUMA_HTTPS_HOST" )
 
+# Проверяем DNS записи перед получением сертификата
+log "Проверка DNS записей..."
+DNS_OK=true
+for domain_arg in "${LE_DOMAIN_ARGS[@]}"; do
+    domain="${domain_arg#-d }"
+    if ! host "$domain" >/dev/null 2>&1 && ! nslookup "$domain" >/dev/null 2>&1; then
+        warn_log "DNS запись для $domain не найдена"
+        DNS_OK=false
+    else
+        success_log "DNS для $domain: OK"
+    fi
+done
+
+if [[ "$DNS_OK" != "true" ]]; then
+    warn_log "Не все DNS записи настроены — certbot может не сработать"
+    read -r -p "Продолжить получение SSL? (y/n): " continue_ssl
+    if [[ "$continue_ssl" != "y" ]]; then
+        warn_log "Пропускаем получение SSL сертификатов"
+        SSL_OK=false
+    fi
+fi
+
 # Проверяем занят ли порт 80
 PORT_80_BUSY=false
-if ss -tlnp | grep -q ':80\s'; then
+if ss -tlnp 2>/dev/null | grep -q ':80\s' || netstat -tlnp 2>/dev/null | grep -q ':80\s'; then
     PORT_80_BUSY=true
     warn_log "Порт 80 занят — будем использовать webroot метод для certbot"
 fi
 
 # Останавливаем Nginx только если порт 80 занят им
 if [[ "$PORT_80_BUSY" == "true" ]]; then
-    if systemctl is-active --quiet nginx; then
+    if systemctl is-active --quiet nginx 2>/dev/null; then
         log "Останавливаем Nginx для получения SSL..."
         systemctl stop nginx
         sleep 2
@@ -1351,7 +1373,7 @@ if [[ "$USE_ZEROSSL" != "y" ]]; then
 
         mkdir -p /var/www/letsencrypt
 
-        # Временный Nginx конфиг для webroot
+        # Временный Nginx конфиг для webroot (БЕЗ SSL!)
         cat > /etc/nginx/sites-available/certbot-temp.conf << 'CERTTEMP'
 server {
     listen 80;
@@ -1366,19 +1388,31 @@ server {
     }
 }
 CERTTEMP
+        # Удаляем дефолтный конфиг чтобы избежать конфликтов
+        rm -f /etc/nginx/sites-enabled/default
+
         ln -sf /etc/nginx/sites-available/certbot-temp.conf /etc/nginx/sites-enabled/
-        nginx -t && systemctl start nginx
+
+        # Проверяем конфигурацию и запускаем Nginx
+        if nginx -t 2>&1; then
+            systemctl start nginx 2>/dev/null || service nginx start 2>/dev/null || nginx 2>/dev/null
+            sleep 2
+        else
+            error_log "Nginx конфигурация невалидна"
+            cat /var/log/nginx/error.log 2>/dev/null | tail -10
+        fi
 
         # Получаем сертификат через webroot
         if certbot certonly --webroot -w /var/www/letsencrypt --non-interactive --agree-tos --email "${SSL_EMAIL}" "${LE_DOMAIN_ARGS[@]}"; then
             SSL_OK=true
         else
             error_log "Certbot webroot не сработал — проверьте DNS записи"
+            cat /var/log/letsencrypt/letsencrypt.log 2>/dev/null | tail -20
         fi
 
-        # Удаляем временный конфиг
+        # Удаляем временный конфиг и останавливаем Nginx
         rm -f /etc/nginx/sites-enabled/certbot-temp.conf
-        systemctl stop nginx
+        systemctl stop nginx 2>/dev/null || service nginx stop 2>/dev/null || true
     else
         # Порт 80 свободен — используем standalone
         if [[ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]]; then
