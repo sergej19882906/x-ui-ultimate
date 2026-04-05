@@ -11,6 +11,10 @@
 
 ### Added
 - WARP (Cloudflare) в режиме **proxy** — SOCKS5 на 127.0.0.1:40000
+- **Shadowsocks 2022** — новая версия с методом 2022-blake3-aes-256-gcm
+- **Naive Proxy** — маскировка под Chrome трафик через Caddy forwardproxy
+- **Cloak** — маскировка под обычный HTTPS с поддержкой probe resistance
+- **VLESS Reality** — автоматическая генерация ключей (x25519) и конфигурации
 
 ### Fixed
 - WARP **не разрывает SSH и Nginx** — proxy mode не меняет маршрутизацию

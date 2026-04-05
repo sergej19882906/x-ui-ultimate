@@ -101,10 +101,13 @@ sudo ./install.sh
 - WebSocket + TLS
 - gRPC + TLS
 - ShadowTLS
-- Reality
+- Reality (автоконфигурация ключей)
 - Hysteria 2
 - Tuic (UDP over QUIC)
 - WireGuard
+- Shadowsocks 2022 (2022-blake3-aes-256-gcm)
+- Naive Proxy (маскировка под Chrome)
+- Cloak (маскировка под HTTPS)
 
 ### 📊 Мониторинг
 - Telegram уведомления

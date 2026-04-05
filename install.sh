@@ -134,12 +134,51 @@ read -r -p "Hysteria 2? (y/n): " ENABLE_HYSTERIA
 read -r -p "Tuic? (y/n): " ENABLE_TUIC
 read -r -p "WireGuard? (y/n): " ENABLE_WIREGUARD
 read -r -p "WARP (Cloudflare)? (y/n): " ENABLE_WARP
+read -r -p "Shadowsocks 2022? (y/n): " ENABLE_SS2022
+read -r -p "Naive Proxy? (y/n): " ENABLE_NAIVE
+read -r -p "Cloak? (y/n): " ENABLE_CLOAK
 
 if [[ "$ENABLE_OBFUSCATION" == "y" ]]; then
     log "Транспорт маскировки: ${TRANSPORT_TYPE}"
 fi
 if [[ "$ENABLE_REALITY" == "y" ]]; then
-    warn_log "Reality: настройте вручную в панели X-UI после установки"
+    log "Reality: генерация ключей и конфигурации..."
+
+    # Генерация ключей Reality
+    if command -v xray &>/dev/null || [[ -f /usr/local/bin/xray ]]; then
+        REALITY_KEYS=$(/usr/local/bin/xray x25519 2>/dev/null || xray x25519 2>/dev/null)
+        REALITY_PRIVATE=$(echo "$REALITY_KEYS" | grep "Private key:" | awk '{print $3}')
+        REALITY_PUBLIC=$(echo "$REALITY_KEYS" | grep "Public key:" | awk '{print $3}')
+        REALITY_SHORT_ID=$(openssl rand -hex 8)
+
+        # Популярные домены для маскировки
+        REALITY_DEST="www.microsoft.com:443"
+        REALITY_SERVER_NAMES="www.microsoft.com,www.bing.com"
+
+        mkdir -p /usr/local/x-ui/reality
+        cat > /usr/local/x-ui/reality/config.json << REALITYCF
+{
+    "privateKey": "${REALITY_PRIVATE}",
+    "publicKey": "${REALITY_PUBLIC}",
+    "shortId": "${REALITY_SHORT_ID}",
+    "dest": "${REALITY_DEST}",
+    "serverNames": "${REALITY_SERVER_NAMES}",
+    "spiderX": "/"
+}
+REALITYCF
+
+        success_log "Reality ключи сгенерированы"
+        echo "REALITY_PRIVATE=${REALITY_PRIVATE}" >> /root/x-ui-credentials.txt
+        echo "REALITY_PUBLIC=${REALITY_PUBLIC}" >> /root/x-ui-credentials.txt
+        echo "REALITY_SHORT_ID=${REALITY_SHORT_ID}" >> /root/x-ui-credentials.txt
+        echo "REALITY_DEST=${REALITY_DEST}" >> /root/x-ui-credentials.txt
+        echo "REALITY_SERVER_NAMES=${REALITY_SERVER_NAMES}" >> /root/x-ui-credentials.txt
+
+        log "Reality конфигурация сохранена в /usr/local/x-ui/reality/config.json"
+        log "Импортируйте эти данные в X-UI панель для настройки Reality"
+    else
+        warn_log "xray не найден — установите v2ray/xray для генерации ключей Reality"
+    fi
 fi
 
 if [[ "$USE_CDN" == "y" ]]; then
@@ -364,6 +403,257 @@ WGC
 fi
 
 # =============================================================================
+# Shadowsocks 2022
+# =============================================================================
+if [[ "$ENABLE_SS2022" == "y" ]]; then
+    log "Shadowsocks 2022..."
+
+    # Установка shadowsocks-rust (поддерживает SS2022)
+    SS_VERSION=$(curl -s https://api.github.com/repos/shadowsocks/shadowsocks-rust/releases/latest | grep -oP '"tag_name": "\K[^"]+')
+    if [[ -z "$SS_VERSION" ]]; then
+        warn_log "Не удалось получить версию Shadowsocks"
+    else
+        case $ARCH in
+            x86_64) SS_ARCH="x86_64-unknown-linux-gnu" ;;
+            aarch64) SS_ARCH="aarch64-unknown-linux-gnu" ;;
+            armv7l) SS_ARCH="armv7-unknown-linux-gnueabihf" ;;
+            *)
+                warn_log "Shadowsocks 2022: нет сборки для $ARCH"
+                SS_ARCH=""
+                ;;
+        esac
+
+        if [[ -n "$SS_ARCH" ]]; then
+            SS_URL="https://github.com/shadowsocks/shadowsocks-rust/releases/download/${SS_VERSION}/shadowsocks-${SS_VERSION}.${SS_ARCH}.tar.xz"
+            if curl -fsSL "$SS_URL" -o /tmp/ss2022.tar.xz; then
+                tar -xJf /tmp/ss2022.tar.xz -C /tmp/
+                mv /tmp/ssserver /usr/local/bin/
+                chmod +x /usr/local/bin/ssserver
+                rm -f /tmp/ss2022.tar.xz
+
+                # Генерация ключа для SS2022
+                SS_PASSWORD=$(openssl rand -base64 32)
+                SS_PORT=$((RANDOM % 10000 + 50000))
+
+                # Конфигурация
+                mkdir -p /etc/shadowsocks
+                cat > /etc/shadowsocks/config.json << SSCONF
+{
+    "server": "0.0.0.0",
+    "server_port": ${SS_PORT},
+    "password": "${SS_PASSWORD}",
+    "method": "2022-blake3-aes-256-gcm",
+    "mode": "tcp_and_udp",
+    "fast_open": true,
+    "nameserver": "1.1.1.1",
+    "timeout": 300
+}
+SSCONF
+
+                # Systemd service
+                cat > /etc/systemd/system/shadowsocks.service << 'SSSVC'
+[Unit]
+Description=Shadowsocks 2022 Server
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/ssserver -c /etc/shadowsocks/config.json
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+SSSVC
+
+                systemctl daemon-reload
+                systemctl enable shadowsocks
+                systemctl start shadowsocks
+
+                if systemctl is-active --quiet shadowsocks; then
+                    success_log "Shadowsocks 2022 запущен на порту ${SS_PORT}"
+                    echo "SS2022_PORT=${SS_PORT}" >> /root/x-ui-credentials.txt
+                    echo "SS2022_PASSWORD=${SS_PASSWORD}" >> /root/x-ui-credentials.txt
+                    echo "SS2022_METHOD=2022-blake3-aes-256-gcm" >> /root/x-ui-credentials.txt
+                else
+                    warn_log "Shadowsocks 2022 не запустился"
+                fi
+            else
+                warn_log "Не удалось скачать Shadowsocks 2022"
+            fi
+        fi
+    fi
+fi
+
+# =============================================================================
+# Naive Proxy
+# =============================================================================
+if [[ "$ENABLE_NAIVE" == "y" ]]; then
+    log "Naive Proxy..."
+
+    # Naive требует Caddy с плагином forwardproxy
+    CADDY_VERSION=$(curl -s https://api.github.com/repos/caddyserver/caddy/releases/latest | grep -oP '"tag_name": "\K[^"]+')
+    if [[ -z "$CADDY_VERSION" ]]; then
+        warn_log "Не удалось получить версию Caddy"
+    else
+        # Установка xcaddy для сборки с плагином
+        go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest 2>/dev/null || {
+            apt install -y golang-go
+            export GOPATH=/root/go
+            export PATH=$PATH:$GOPATH/bin
+            go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
+        }
+
+        if command -v xcaddy &>/dev/null || [[ -f /root/go/bin/xcaddy ]]; then
+            XCADDY_BIN="${GOPATH:-/root/go}/bin/xcaddy"
+
+            # Собираем Caddy с forwardproxy
+            cd /tmp
+            $XCADDY_BIN build --with github.com/caddyserver/forwardproxy@caddy2
+            mv caddy /usr/local/bin/caddy-naive
+            chmod +x /usr/local/bin/caddy-naive
+
+            # Генерация учётных данных
+            NAIVE_USER="user$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 6)"
+            NAIVE_PASS=$(head /dev/urandom | tr -dc 'A-Za-z0-9@#%_' | head -c 20)
+            NAIVE_PORT=8443
+
+            # Caddyfile конфигурация
+            mkdir -p /etc/caddy-naive
+            cat > /etc/caddy-naive/Caddyfile << NAIVECF
+:${NAIVE_PORT} {
+    tls ${SSL_EMAIL}
+    route {
+        forward_proxy {
+            basic_auth ${NAIVE_USER} ${NAIVE_PASS}
+            hide_ip
+            hide_via
+            probe_resistance
+        }
+        respond "404 Not Found" 404
+    }
+}
+NAIVECF
+
+            # Systemd service
+            cat > /etc/systemd/system/naive-proxy.service << 'NAIVESVC'
+[Unit]
+Description=Naive Proxy (Caddy with forwardproxy)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/caddy-naive run --config /etc/caddy-naive/Caddyfile
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+NAIVESVC
+
+            systemctl daemon-reload
+            systemctl enable naive-proxy
+            systemctl start naive-proxy
+
+            if systemctl is-active --quiet naive-proxy; then
+                success_log "Naive Proxy запущен на порту ${NAIVE_PORT}"
+                echo "NAIVE_PORT=${NAIVE_PORT}" >> /root/x-ui-credentials.txt
+                echo "NAIVE_USER=${NAIVE_USER}" >> /root/x-ui-credentials.txt
+                echo "NAIVE_PASS=${NAIVE_PASS}" >> /root/x-ui-credentials.txt
+            else
+                warn_log "Naive Proxy не запустился"
+            fi
+        else
+            warn_log "xcaddy не установлен — пропуск Naive Proxy"
+        fi
+    fi
+fi
+
+# =============================================================================
+# Cloak
+# =============================================================================
+if [[ "$ENABLE_CLOAK" == "y" ]]; then
+    log "Cloak..."
+
+    # Установка Cloak
+    CLOAK_VERSION=$(curl -s https://api.github.com/repos/cbeuw/Cloak/releases/latest | grep -oP '"tag_name": "\K[^"]+')
+    if [[ -z "$CLOAK_VERSION" ]]; then
+        warn_log "Не удалось получить версию Cloak"
+    else
+        case $ARCH in
+            x86_64) CLOAK_ARCH="linux-amd64" ;;
+            aarch64) CLOAK_ARCH="linux-arm64" ;;
+            armv7l) CLOAK_ARCH="linux-arm" ;;
+            *)
+                warn_log "Cloak: нет сборки для $ARCH"
+                CLOAK_ARCH=""
+                ;;
+        esac
+
+        if [[ -n "$CLOAK_ARCH" ]]; then
+            CLOAK_URL="https://github.com/cbeuw/Cloak/releases/download/${CLOAK_VERSION}/ck-server-${CLOAK_ARCH}-${CLOAK_VERSION}"
+            if curl -fsSL "$CLOAK_URL" -o /usr/local/bin/ck-server; then
+                chmod +x /usr/local/bin/ck-server
+
+                # Генерация ключей
+                CLOAK_UID=$(/usr/local/bin/ck-server -u 2>/dev/null | head -1)
+                CLOAK_PUBKEY=$(/usr/local/bin/ck-server -k 2>/dev/null | grep "Public" | awk '{print $3}')
+                CLOAK_PRIVKEY=$(/usr/local/bin/ck-server -k 2>/dev/null | grep "Private" | awk '{print $3}')
+                CLOAK_ADMINUID=$(/usr/local/bin/ck-server -u 2>/dev/null | head -1)
+                CLOAK_PORT=8443
+
+                # Конфигурация
+                mkdir -p /etc/cloak
+                cat > /etc/cloak/server.json << CLOAKCF
+{
+  "ProxyBook": {
+    "shadowsocks": ["tcp", "127.0.0.1:8388"]
+  },
+  "BindAddr": [":${CLOAK_PORT}"],
+  "BypassUID": ["${CLOAK_ADMINUID}"],
+  "RedirAddr": "www.bing.com:443",
+  "PrivateKey": "${CLOAK_PRIVKEY}",
+  "DatabasePath": "/etc/cloak/userinfo.db",
+  "StreamTimeout": 300
+}
+CLOAKCF
+
+                # Systemd service
+                cat > /etc/systemd/system/cloak.service << 'CLOAKSVC'
+[Unit]
+Description=Cloak Server
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/ck-server -c /etc/cloak/server.json
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+CLOAKSVC
+
+                systemctl daemon-reload
+                systemctl enable cloak
+                systemctl start cloak
+
+                if systemctl is-active --quiet cloak; then
+                    success_log "Cloak запущен на порту ${CLOAK_PORT}"
+                    echo "CLOAK_PORT=${CLOAK_PORT}" >> /root/x-ui-credentials.txt
+                    echo "CLOAK_UID=${CLOAK_UID}" >> /root/x-ui-credentials.txt
+                    echo "CLOAK_PUBKEY=${CLOAK_PUBKEY}" >> /root/x-ui-credentials.txt
+                else
+                    warn_log "Cloak не запустился"
+                fi
+            else
+                warn_log "Не удалось скачать Cloak"
+            fi
+        fi
+    fi
+fi
+
+# =============================================================================
 # WARP (Cloudflare)
 # =============================================================================
 if [[ "$ENABLE_WARP" == "y" ]]; then
@@ -468,6 +758,16 @@ if [[ "$ENABLE_WARP" == "y" ]]; then
 fi
 if [[ "$ENABLE_HYSTERIA" == "y" ]]; then
     ufw allow 443/udp
+fi
+if [[ "$ENABLE_SS2022" == "y" ]]; then
+    ufw allow "${SS_PORT}"/tcp comment 'Shadowsocks2022' 2>/dev/null || ufw allow "${SS_PORT}"/tcp
+    ufw allow "${SS_PORT}"/udp comment 'Shadowsocks2022' 2>/dev/null || ufw allow "${SS_PORT}"/udp
+fi
+if [[ "$ENABLE_NAIVE" == "y" ]]; then
+    ufw allow "${NAIVE_PORT}"/tcp comment 'NaiveProxy' 2>/dev/null || ufw allow "${NAIVE_PORT}"/tcp
+fi
+if [[ "$ENABLE_CLOAK" == "y" ]]; then
+    ufw allow "${CLOAK_PORT}"/tcp comment 'Cloak' 2>/dev/null || ufw allow "${CLOAK_PORT}"/tcp
 fi
 if [[ "$INSTALL_PORTAINER" == "y" ]]; then
     if [[ "$USE_DOCKER_SUBDOMAIN_TLS" != "y" ]]; then
@@ -1738,6 +2038,30 @@ echo -e "  UFW:       ${GREEN}Включён${NC}"
 echo -e "  BBR:       ${GREEN}Включён${NC}"
 if [[ "$DOCKER_OK" == "true" ]]; then
     echo -e "  Docker:    ${GREEN}Установлен${NC}"
+fi
+
+echo ""
+echo -e "${CYAN}🛡️ Протоколы обхода:${NC}"
+if [[ "$ENABLE_REALITY" == "y" ]]; then
+    echo -e "  Reality:   ${GREEN}Настроен${NC} (ключи в /root/x-ui-credentials.txt)"
+fi
+if [[ "$ENABLE_SS2022" == "y" ]]; then
+    echo -e "  SS2022:    ${GREEN}Порт ${SS_PORT}${NC}"
+fi
+if [[ "$ENABLE_NAIVE" == "y" ]]; then
+    echo -e "  Naive:     ${GREEN}Порт ${NAIVE_PORT}${NC}"
+fi
+if [[ "$ENABLE_CLOAK" == "y" ]]; then
+    echo -e "  Cloak:     ${GREEN}Порт ${CLOAK_PORT}${NC}"
+fi
+if [[ "$ENABLE_HYSTERIA" == "y" ]]; then
+    echo -e "  Hysteria2: ${GREEN}Установлен${NC}"
+fi
+if [[ "$ENABLE_TUIC" == "y" ]]; then
+    echo -e "  Tuic:      ${GREEN}Установлен${NC}"
+fi
+if [[ "$ENABLE_WIREGUARD" == "y" ]]; then
+    echo -e "  WireGuard: ${GREEN}Порт 51820${NC}"
 fi
 
 echo ""
