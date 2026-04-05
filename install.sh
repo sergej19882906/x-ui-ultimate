@@ -1295,32 +1295,47 @@ fi
 log "SSL..."
 SSL_OK=false
 
-# Один сертификат на основной домен + поддомены Portainer/Kuma (если включены)
-LE_DOMAIN_ARGS=( -d "$DOMAIN" )
-[[ -n "$PORTAINER_HTTPS_HOST" ]] && LE_DOMAIN_ARGS+=( -d "$PORTAINER_HTTPS_HOST" )
-[[ -n "$KUMA_HTTPS_HOST" ]] && LE_DOMAIN_ARGS+=( -d "$KUMA_HTTPS_HOST" )
+# Спрашиваем нужен ли SSL
+read -r -p "Получить SSL сертификаты? (y/n, Enter=y): " GET_SSL
+GET_SSL="${GET_SSL:-y}"
 
-# Проверяем DNS записи перед получением сертификата
-log "Проверка DNS записей..."
-DNS_OK=true
-for domain_arg in "${LE_DOMAIN_ARGS[@]}"; do
-    domain="${domain_arg#-d }"
-    if ! host "$domain" >/dev/null 2>&1 && ! nslookup "$domain" >/dev/null 2>&1; then
-        warn_log "DNS запись для $domain не найдена"
-        DNS_OK=false
-    else
-        success_log "DNS для $domain: OK"
-    fi
-done
+if [[ "$GET_SSL" != "y" ]]; then
+    warn_log "Пропускаем получение SSL сертификатов"
+    SSL_OK=false
+else
+    # Один сертификат на основной домен + поддомены Portainer/Kuma (если включены)
+    LE_DOMAIN_ARGS=( -d "$DOMAIN" )
+    [[ -n "$PORTAINER_HTTPS_HOST" ]] && LE_DOMAIN_ARGS+=( -d "$PORTAINER_HTTPS_HOST" )
+    [[ -n "$KUMA_HTTPS_HOST" ]] && LE_DOMAIN_ARGS+=( -d "$KUMA_HTTPS_HOST" )
 
-if [[ "$DNS_OK" != "true" ]]; then
-    warn_log "Не все DNS записи настроены — certbot может не сработать"
-    read -r -p "Продолжить получение SSL? (y/n): " continue_ssl
-    if [[ "$continue_ssl" != "y" ]]; then
-        warn_log "Пропускаем получение SSL сертификатов"
+    # Проверяем DNS записи перед получением сертификата
+    log "Проверка DNS записей..."
+    DNS_OK=true
+    for domain_arg in "${LE_DOMAIN_ARGS[@]}"; do
+        domain="${domain_arg#-d }"
+
+        # Проверка с timeout 5 секунд
+        if timeout 5 host "$domain" >/dev/null 2>&1; then
+            success_log "DNS для $domain: OK"
+        elif timeout 5 nslookup "$domain" >/dev/null 2>&1; then
+            success_log "DNS для $domain: OK (nslookup)"
+        elif timeout 5 dig +short "$domain" >/dev/null 2>&1; then
+            success_log "DNS для $domain: OK (dig)"
+        else
+            warn_log "DNS запись для $domain не найдена или timeout"
+            DNS_OK=false
+        fi
+    done
+
+    if [[ "$DNS_OK" != "true" ]]; then
+        warn_log "Не все DNS записи настроены — certbot может не сработать"
+        warn_log "Пропускаем получение SSL сертификатов (можно получить позже через certbot вручную)"
         SSL_OK=false
+        GET_SSL="n"
     fi
 fi
+
+if [[ "$GET_SSL" == "y" ]]; then
 
 # Проверяем занят ли порт 80
 PORT_80_BUSY=false
@@ -1438,6 +1453,9 @@ CERTTEMP
         chmod 600 /usr/local/x-ui/cert/server.key
         success_log "SSL сертификаты скопированы в /usr/local/x-ui/cert/"
     fi
+fi
+
+# Закрываем блок if [[ "$GET_SSL" == "y" ]]
 fi
 
 # =============================================================================

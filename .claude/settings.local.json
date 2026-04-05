@@ -12,7 +12,9 @@
       "Bash(findstr \":80 \")",
       "Bash(tasklist)",
       "Bash(findstr \" 4 \")",
-      "Bash(sc query:*)"
+      "Bash(sc query:*)",
+      "Bash(grep -n '^if \\\\[\\\\[ \"$GET_SSL\" == \"y\" \\\\]\\\\]; then' install.sh)",
+      "Bash(grep -n \"^fi$\" install.sh)"
     ]
   }
 }
