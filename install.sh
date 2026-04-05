@@ -1944,6 +1944,81 @@ chmod +x /usr/local/x-ui/health-check.sh
 _cron_set_line "*/5 * * * * /usr/local/x-ui/health-check.sh"
 
 # =============================================================================
+# Диагностика
+# =============================================================================
+cat > /usr/local/x-ui/diagnose.sh << 'DIAGSH'
+#!/bin/bash
+echo "=== X-UI Diagnostics ==="
+echo "Date: $(date)"
+echo ""
+
+echo "=== X-UI Status ==="
+systemctl status x-ui --no-pager 2>&1 | head -20
+echo ""
+
+echo "=== X-UI Logs (last 20 lines) ==="
+journalctl -u x-ui -n 20 --no-pager 2>&1
+echo ""
+
+echo "=== Nginx Status ==="
+systemctl status nginx --no-pager 2>&1 | head -15
+echo ""
+
+echo "=== Listening Ports ==="
+ss -tlnp | grep -E "x-ui|nginx|ssserver|caddy|ck-server" 2>&1
+echo ""
+
+echo "=== Database ==="
+ls -lah /usr/local/x-ui/x-ui.db 2>&1
+echo ""
+
+echo "=== SSL Certificates ==="
+certbot certificates 2>&1 | head -20
+echo ""
+
+echo "=== UFW Status ==="
+ufw status verbose 2>&1 | head -30
+echo ""
+
+echo "=== Credentials ==="
+cat /root/x-ui-credentials.txt 2>&1
+echo ""
+
+echo "=== Disk Space ==="
+df -h / 2>&1
+echo ""
+
+echo "=== Memory ==="
+free -h 2>&1
+echo ""
+
+echo "=== CPU Load ==="
+uptime 2>&1
+echo ""
+
+echo "=== AppArmor Denials ==="
+dmesg 2>/dev/null | grep -i "apparmor.*denied" | grep x-ui | tail -5
+echo ""
+
+echo "=== Recent Errors in dmesg ==="
+dmesg 2>/dev/null | grep -iE "error|fail|segfault" | grep -i x-ui | tail -5
+echo ""
+
+echo "=== Protocol Services ==="
+for svc in shadowsocks naive-proxy cloak; do
+    if systemctl list-unit-files | grep -q "^${svc}.service"; then
+        echo "--- ${svc} ---"
+        systemctl status ${svc} --no-pager 2>&1 | head -10
+        echo ""
+    fi
+done
+
+echo "=== End of Diagnostics ==="
+DIAGSH
+chmod +x /usr/local/x-ui/diagnose.sh
+success_log "Скрипт диагностики: /usr/local/x-ui/diagnose.sh"
+
+# =============================================================================
 # Очистка
 # =============================================================================
 if [[ "$ENABLE_CLEANUP" == "y" ]]; then
@@ -2081,6 +2156,7 @@ echo ""
 echo -e "${CYAN}⚙️ Команды:${NC}"
 echo -e "  x-ui              - меню"
 echo -e "  x-ui status       - статус"
+echo -e "  /usr/local/x-ui/diagnose.sh - полная диагностика"
 if [[ "$ENABLE_WARP" == "y" ]]; then
     echo -e "  warp-cli status   - статус WARP"
     echo -e "  warp-cli connect  - подключить WARP"

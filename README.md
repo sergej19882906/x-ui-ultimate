@@ -186,10 +186,31 @@ MIT License — см. [LICENSE](LICENSE)
 
 ## 🤝 Поддержка
 
+### Диагностика проблем
+
+```bash
+# Полная диагностика системы
+/usr/local/x-ui/diagnose.sh
+
+# Сохранить в файл
+/usr/local/x-ui/diagnose.sh > /root/x-ui-debug.txt
+```
+
+### Типичные проблемы
+
+См. подробное руководство: [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
+
+**Быстрые проверки:**
+
 1. Проверьте логи: `journalctl -u x-ui -f`
 2. Проверьте статус: `systemctl status x-ui`
 3. Перезапустите: `systemctl restart x-ui`
-4. Восстановите из бэкапа
+4. Восстановите из бэкапа: `cp /root/x-ui-backups/x-ui-db-*.bak /usr/local/x-ui/x-ui.db && systemctl restart x-ui`
+
+### Получить помощь
+
+- GitHub Issues: https://github.com/sergej19882906/x-ui-ultimate/issues
+- Приложите вывод `/usr/local/x-ui/diagnose.sh`
 
 ---
 
