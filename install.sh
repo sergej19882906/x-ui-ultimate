@@ -1410,7 +1410,52 @@ fi
 # Nginx
 # =============================================================================
 log "Nginx..."
-apt install -y nginx
+
+# Установка Nginx с обработкой ошибок systemd
+if ! apt install -y nginx 2>&1 | tee /tmp/nginx-install.log; then
+    warn_log "Nginx установка завершилась с ошибкой — проверяем..."
+
+    # Проверяем установлен ли Nginx несмотря на ошибку
+    if command -v nginx &>/dev/null; then
+        success_log "Nginx установлен (игнорируем ошибку deb-systemd-invoke)"
+    else
+        error_log "Nginx не установлен"
+        exit 1
+    fi
+fi
+
+# Проверяем и исправляем systemd если нужно
+if grep -q "Could not execute systemctl" /tmp/nginx-install.log 2>/dev/null; then
+    warn_log "Обнаружена проблема с systemctl — исправляем..."
+
+    # Перезагружаем systemd
+    systemctl daemon-reexec 2>/dev/null || true
+    systemctl daemon-reload 2>/dev/null || true
+
+    # Пробуем включить Nginx вручную
+    if ! systemctl enable nginx 2>/dev/null; then
+        warn_log "systemctl enable nginx не сработал — создаём symlink вручную"
+        ln -sf /usr/lib/systemd/system/nginx.service /etc/systemd/system/multi-user.target.wants/nginx.service 2>/dev/null || true
+    fi
+fi
+
+# Проверяем что Nginx работает
+if ! systemctl is-active --quiet nginx 2>/dev/null; then
+    log "Запускаем Nginx..."
+    if ! systemctl start nginx 2>/dev/null; then
+        warn_log "systemctl start не сработал — пробуем через service"
+        service nginx start 2>/dev/null || nginx 2>/dev/null || true
+    fi
+fi
+
+# Финальная проверка
+if systemctl is-active --quiet nginx 2>/dev/null || pgrep nginx >/dev/null; then
+    success_log "Nginx запущен"
+else
+    warn_log "Nginx может быть не запущен — проверьте вручную: systemctl status nginx"
+fi
+
+rm -f /tmp/nginx-install.log
 
 cat > /var/www/html/index.html << 'CATHTML'
 <!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Кото-Сервер</title>
