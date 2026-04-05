@@ -1106,17 +1106,71 @@ if [[ -f /usr/local/x-ui/x-ui ]]; then
     # === Шаг 1: Инициализация БД ===
     if [[ ! -f /usr/local/x-ui/x-ui.db ]]; then
         log "Инициализация БД x-ui.db..."
-        # Запускаем x-ui чтобы он создал БД
-        timeout 8 ./x-ui >/dev/null 2>&1 || true
-        sleep 3
-        # Останавливаем
-        systemctl stop x-ui 2>/dev/null || pkill -f '/usr/local/x-ui/x-ui' 2>/dev/null || true
+
+        # Метод 1: Запустить x-ui в фоне для создания БД
+        cd /usr/local/x-ui
+        ./x-ui > /tmp/x-ui-init.log 2>&1 &
+        XUI_PID=$!
+
+        # Ждём создания БД (максимум 15 секунд)
+        for i in $(seq 1 15); do
+            if [[ -f /usr/local/x-ui/x-ui.db ]]; then
+                success_log "БД x-ui.db создана за ${i} сек"
+                break
+            fi
+            sleep 1
+        done
+
+        # Останавливаем процесс
+        kill -15 $XUI_PID 2>/dev/null || true
         sleep 2
-        if [[ -f /usr/local/x-ui/x-ui.db ]]; then
-            success_log "БД x-ui.db создана"
-        else
-            warn_log "БД x-ui.db не создана — x-ui может не запуститься"
+        pkill -f '/usr/local/x-ui/x-ui' 2>/dev/null || true
+
+        # Проверяем результат
+        if [[ ! -f /usr/local/x-ui/x-ui.db ]]; then
+            warn_log "БД не создана методом 1, пробуем метод 2..."
+
+            # Метод 2: Создать пустую БД и инициализировать через sqlite3
+            apt install -y sqlite3 2>/dev/null || true
+
+            if command -v sqlite3 &>/dev/null; then
+                # Создаём базовую структуру БД
+                sqlite3 /usr/local/x-ui/x-ui.db << 'DBINIT'
+CREATE TABLE IF NOT EXISTS user (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE,
+    password TEXT NOT NULL,
+    webBasePath TEXT DEFAULT '/',
+    cert TEXT DEFAULT '',
+    key TEXT DEFAULT ''
+);
+INSERT OR IGNORE INTO user (id, username, password) VALUES (1, 'admin', 'admin');
+DBINIT
+
+                if [[ -f /usr/local/x-ui/x-ui.db ]]; then
+                    success_log "БД создана через sqlite3"
+                else
+                    error_log "Не удалось создать БД — x-ui может не запуститься"
+                fi
+            else
+                warn_log "sqlite3 недоступен"
+
+                # Метод 3: Скачать готовую пустую БД из репозитория X-UI
+                log "Пробуем скачать готовую БД из репозитория..."
+                DB_URL="https://raw.githubusercontent.com/${XUI_REPO}/main/x-ui.db"
+                if curl -fsSL "$DB_URL" -o /usr/local/x-ui/x-ui.db 2>/dev/null; then
+                    success_log "БД скачана из репозитория"
+                    chmod 600 /usr/local/x-ui/x-ui.db
+                else
+                    error_log "Не удалось скачать БД — x-ui создаст её при первом запуске"
+                fi
+            fi
         fi
+
+        # Устанавливаем права
+        chmod 600 /usr/local/x-ui/x-ui.db 2>/dev/null || true
+    else
+        log "БД x-ui.db уже существует"
     fi
 
     # === Шаг 2: Настройка через x-ui setting (по одному параметру) ===

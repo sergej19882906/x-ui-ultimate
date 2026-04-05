@@ -160,23 +160,71 @@ WARN: БД x-ui.db не создана — x-ui может не запустит
 WARN: x-ui setting -port не сработал
 ```
 
+### Причины:
+- X-UI не успевает создать БД за отведённое время
+- Процесс x-ui падает при инициализации
+- Недостаточно прав на запись
+
 ### Решения:
 
-**Метод 1: Ручная инициализация**
+**Метод 1: Ручная инициализация (улучшенный)**
 ```bash
 cd /usr/local/x-ui
 systemctl stop x-ui
 
-# Запустить на 10 секунд для создания БД
-timeout 10 ./x-ui &
-sleep 8
+# Запустить x-ui в фоне
+./x-ui > /tmp/x-ui-init.log 2>&1 &
+XUI_PID=$!
+
+# Ждать создания БД (до 15 секунд)
+for i in $(seq 1 15); do
+    if [[ -f x-ui.db ]]; then
+        echo "БД создана за $i секунд"
+        break
+    fi
+    sleep 1
+done
+
+# Остановить процесс
+kill -15 $XUI_PID
+sleep 2
 pkill -f x-ui
 
-# Проверить БД создана
+# Проверить
 ls -la x-ui.db
 ```
 
-**Метод 2: Прямое редактирование через sqlite3**
+**Метод 2: Создать БД через sqlite3**
+```bash
+apt install -y sqlite3
+
+sqlite3 /usr/local/x-ui/x-ui.db << 'EOF'
+CREATE TABLE IF NOT EXISTS user (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE,
+    password TEXT NOT NULL,
+    webBasePath TEXT DEFAULT '/',
+    cert TEXT DEFAULT '',
+    key TEXT DEFAULT ''
+);
+INSERT OR IGNORE INTO user (id, username, password) VALUES (1, 'admin', 'admin');
+EOF
+
+chmod 600 /usr/local/x-ui/x-ui.db
+systemctl restart x-ui
+```
+
+**Метод 3: Скачать готовую БД**
+```bash
+# Для MHSanaei/3x-ui
+curl -fsSL https://raw.githubusercontent.com/MHSanaei/3x-ui/main/x-ui.db \
+  -o /usr/local/x-ui/x-ui.db
+
+chmod 600 /usr/local/x-ui/x-ui.db
+systemctl restart x-ui
+```
+
+**Метод 4: Прямое редактирование через sqlite3**
 ```bash
 apt install -y sqlite3
 
