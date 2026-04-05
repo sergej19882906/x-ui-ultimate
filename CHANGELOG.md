@@ -7,7 +7,7 @@
 
 ---
 
-## [1.2.0] - 2026-04-03
+## [1.2.0] - 2026-04-05
 
 ### Added
 - WARP (Cloudflare) в режиме **proxy** — SOCKS5 на 127.0.0.1:40000
@@ -16,9 +16,11 @@
 - WARP **не разрывает SSH и Nginx** — proxy mode не меняет маршрутизацию
 - SSL cp обрывал скрипт — 'same file' ошибка при symlink
 - x-ui setting вызывается по одному параметру — не все сразу
-- Увеличен timeout инициализации БД до 8 сек
+- Увеличен timeout инициализации БД до 15 сек
 - Fallback: sqlite3 UPDATE для username и webBasePath
 - Symlink SSL с rm -f перед ln -sf
+- Исправлена опечатка USE_ZEROSSL (было USE_ZEROSL)
+- Синхронизирована версия в заголовке скрипта (1.2.0)
 
 ---
 

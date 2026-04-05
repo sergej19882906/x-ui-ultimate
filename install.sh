@@ -6,7 +6,7 @@
 # =============================================================================
 # GitHub: https://github.com/sergej19882906/x-ui-ultimate
 # License: MIT
-# Version: 1.0.3
+# Version: 1.2.0
 # Year: 2026
 # =============================================================================
 # ⚠️ ПРЕДУПРЕЖДЕНИЕ: Использование для обхода блокировок может быть
@@ -212,7 +212,7 @@ read -r -p "Конвертер ссылок? (y/n): " INSTALL_LINK_CONVERTER
 
 read -r -p "Очистка системы? (y/n): " ENABLE_CLEANUP
 read -r -p "Speedtest? (y/n): " INSTALL_SPEEDTEST
-read -r -p "ZeroSSL вместо Let's Encrypt? (y/n): " USE_ZEROSL
+read -r -p "ZeroSSL вместо Let's Encrypt? (y/n): " USE_ZEROSSL
 
 # HTTPS для Portainer / Uptime Kuma: Nginx + тот же LE-сертификат (SAN), поддомены в DNS
 USE_DOCKER_SUBDOMAIN_TLS="n"
@@ -857,7 +857,7 @@ if [[ -f /usr/local/x-ui/x-ui ]]; then
     # SSL cert/key (только если файлы существуют)
     XUI_CERT=""
     XUI_KEY=""
-    if [[ "$USE_ZEROSL" == "y" ]]; then
+    if [[ "$USE_ZEROSSL" == "y" ]]; then
         XUI_CERT="/usr/local/x-ui/cert/fullchain.crt"
         XUI_KEY="/usr/local/x-ui/cert/server.key"
     elif [[ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]]; then
@@ -893,7 +893,7 @@ if [[ -f /usr/local/x-ui/x-ui ]]; then
 
     # === Шаг 4: Symlink SSL для x-ui ===
     if [[ -n "$XUI_CERT" && -n "$XUI_KEY" ]]; then
-        if [[ "$USE_ZEROSL" != "y" && -d "/etc/letsencrypt/live/${DOMAIN}" ]]; then
+        if [[ "$USE_ZEROSSL" != "y" && -d "/etc/letsencrypt/live/${DOMAIN}" ]]; then
             mkdir -p /usr/local/x-ui/cert
             rm -f /usr/local/x-ui/cert/server.crt /usr/local/x-ui/cert/server.key
             ln -sf "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" /usr/local/x-ui/cert/server.crt
@@ -948,7 +948,7 @@ LE_DOMAIN_ARGS=( -d "$DOMAIN" )
 
 systemctl stop nginx 2>/dev/null || true
 
-if [[ "$USE_ZEROSL" == "y" ]]; then
+if [[ "$USE_ZEROSSL" == "y" ]]; then
     # shellcheck disable=SC1090
     if curl https://get.acme.sh | sh -s email="${SSL_EMAIL}" && source ~/.bashrc; then
         ~/.acme.sh/acme.sh --register-account -m "${SSL_EMAIL}"
@@ -966,11 +966,11 @@ if [[ "$USE_ZEROSL" == "y" ]]; then
         fi
     fi
     if [[ "$SSL_OK" != "true" ]]; then
-        USE_ZEROSL="n"
+        USE_ZEROSSL="n"
     fi
 fi
 
-if [[ "$USE_ZEROSL" != "y" ]]; then
+if [[ "$USE_ZEROSSL" != "y" ]]; then
     apt install -y certbot
     if [[ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]]; then
         warn_log "SSL: Let's Encrypt — обновление/расширение сертификата и копирование в x-ui"
@@ -1025,7 +1025,7 @@ if [[ "$ENABLE_IPV6" == "y" ]]; then
 fi
 
 # Определяем пути к SSL сертификатам
-if [[ "$USE_ZEROSL" == "y" ]]; then
+if [[ "$USE_ZEROSSL" == "y" ]]; then
     SSL_CERT_PATH="/usr/local/x-ui/cert/fullchain.crt"
     SSL_KEY_PATH="/usr/local/x-ui/cert/server.key"
 else

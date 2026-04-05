@@ -358,6 +358,6 @@ journalctl -u x-ui -n 50
 
 <div align="center">
 
-**X-UI Ultimate Installer v1.0.2** | 2026
+**X-UI Ultimate Installer v1.2.0** | 2026
 
 </div>
